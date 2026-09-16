@@ -1,0 +1,5 @@
+# Caché de importación de Godot: se regenera con `godot --headless --path . --import`
+.godot/
+*.import
+# Binarios de salida (el APK pesa 130 MB)
+export/

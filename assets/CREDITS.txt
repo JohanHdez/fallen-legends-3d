@@ -1,0 +1,34 @@
+Recursos de terceros usados en Fallen Legends 3D.
+
+models/               Quaternius  https://quaternius.com
+  nature/             Stylized Nature MegaKit                     CC0 1.0
+  chars/UAL*.glb      Universal Animation Library 1 y 2           CC0 1.0
+  chars/Superhero_*   Universal Base Characters                   CC0 1.0
+  chars/*_Peasant*    Modular Character Outfits - Fantasy         CC0 1.0
+  chars/*_Ranger*     Modular Character Outfits - Fantasy         CC0 1.0
+  chars/Hair_*        Modular Character Outfits - Fantasy         CC0 1.0
+  chars/Skeleton_A|B, Lycan, Puglin, Imp, Hellwarden, Tidebreaker
+                      Bestiary - Dungeon Monsters Kit             QAL (Quaternius Asset License)
+                      OJO: la QAL permite uso comercial pero NO redistribuir los modelos sueltos,
+                      y la versión Source es de pago. Por eso este repositorio es PRIVADO.
+
+particles/            Kenney - Particle Pack          CC0 1.0  https://kenney.nl/assets/particle-pack
+audio/sfx/            Kenney - Impact Sounds          CC0 1.0  https://kenney.nl/assets/impact-sounds
+audio/music/
+  battleThemeA.mp3    cynicmusic - "Battle Theme A"   CC0 1.0  https://opengameart.org/content/battle-theme-a
+  bossbattle_22k.wav  Juhani Junkala (SubspaceAudio)  CC0 1.0  https://opengameart.org/content/boss-battle-music
+                      "Epic Boss Battle", remuestreado a 22 kHz para el APK.
+
+Todo CC0: dominio público, sin obligación de atribuir. Los créditos se dejan por cortesía.
+DESCARTADOS: Kenney RPG Audio (es utilería, no trae conjuros) y el Magic Summoning Circle de
+OpenGameArt (es una ilustración en perspectiva, no una textura plana de suelo).
+
+audio/spells/         p0ss - "Spell Sounds Starter Pack"   CC-BY-SA 3.0
+                      https://opengameart.org/content/spell-sounds-starter-pack
+                      Selección de 16 sonidos, pasados a mono 22 kHz y renombrados por uso.
+                      OJO: son WAV pese a la extensión .ogg del pack original.
+                      CC-BY-SA OBLIGA a atribuir y a compartir igual. Es la misma licencia que
+                      el arte de Flare que el juego ya usa, así que no añade una atadura nueva.
+
+ui/kill_rewards/      Insignias de baja de Fallen Legends (el 2D), del mismo autor.
+ui/touch/             Iconos táctiles de Fallen Legends (el 2D), del mismo autor.
