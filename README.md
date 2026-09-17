@@ -86,6 +86,7 @@ Reglas por equipos (a petición del usuario, 2026-09-16):
     | Caballero esqueleto | cada 0,8 s | 1,0 s | −20 % |
     | Rompemareas | cada 1,1 s | 1,4 s | −20 % |
     | Ilusionista | cada 0,18 s | sin límite | ×1,6 (ver abajo) |
+  - **Trampa eléctrica y Baliza Nox tardan 3 s en activarse** (ver "Baliza Nox del Químico").
   - **Pistola de la Ilusionista ×1,6** por equipos (petición del usuario; 9 → 14,4 por bala; en la
     Horda sigue en 9): necesitaba ~70 balas para tumbar a cualquiera y ganaba 8 de 36 duelos. Medido
     con 36 duelos por valor: ×1,3 gana 13, ×1,6 gana 16 y ×2,0 gana 19, pero con ×2,0 ya gana el
@@ -280,6 +281,14 @@ Con `beacon.gd` del juego: un **barril de 60 de vida que bloquea el paso**. Espe
 despierta un enemigo a 2 m **o cualquier golpe** — las criaturas la muelen a golpes si la tienen a
 mano. Al reventar suelta humo Nox de 5 m durante 10 s: 8 de daño cada 0,5 s y **velocidad a la
 mitad**. 3 cargas, una cada 10 s, hasta 5 puestas.
+
+**Por equipos, la Baliza Nox y la Trampa eléctrica tardan 3 s en activarse** (petición del usuario,
+2026-09-17; en la Horda y en el 2D saltan al momento). Mientras se activan se ven pero no saltan;
+al activarse la trampa enseña su aro con un chispazo y la baliza da un destello. Antes el Tormentero
+lanzaba la trampa encima del rival y saltaba en el acto (340 de 344): era un aturdimiento seguro y
+ganaba el 81 %. Medido con 28 partidas: con 2 s bajaba al 45 %, pero Químico y Rompemareas subían
+al 80 % y 72 %; con 3 s todas las leyendas quedan entre el 30 % y el 56 %. Contra: las peleas se
+alargan (1v1 de 22 a 57 s, 4v4 de 34 a 43 s).
 
 ## Gas Nox
 

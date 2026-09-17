@@ -35,6 +35,13 @@ const SLOW_MULT := 0.5              # el gas Nox deja a la mitad de velocidad (A
 const BEACON_HP := 60.0
 const BEACON_TRIGGER := 130.0 * PX  # 2 m: a esa distancia un enemigo la despierta
 const BEACON_TINT := Color(0.95, 1.35, 0.8)
+# Por equipos la Trampa eléctrica y la Baliza Nox tardan en activarse (petición del usuario,
+# 2026-09-16; el 2D las activa al momento): se lanzaban encima del rival y saltaban en el acto (340
+# de 344 trampas), así que no eran trampas sino un aturdimiento seguro. Mientras se activan se ven,
+# pero no saltan; al activarse aparece su aro con un chispazo. En la Horda, como siempre. Medido con
+# 28 partidas: con 2 s el Tormentero bajaba del 81 % al 45 % pero Químico y Rompemareas subían al
+# 80 % y 72 %; con 3 s todas quedan entre el 30 % y el 56 %.
+const PVP_ARM_TIME := 3.0
 
 # --- guardia automática del Caballero (player.GUARD_* del juego) ---
 const GUARD_DELAY := 0.4            # segundos quieto antes de cubrirse solo
@@ -96,7 +103,7 @@ var damage_by := {}                 # "Leyenda ranura" -> daño hecho a leyendas
 var soft_hits := 0                  # proyectiles teledirigidos por equipos que acertaron...
 var soft_misses := 0                # ...y los que se apagaron sin tocar a nadie
 var traps_sprung := 0               # trampas eléctricas que alguien pisó después de puestas (sondas: ¿las esquivan?)
-var traps_on_top := 0               # ...y las que saltaron nada más caer, encima de alguien
+var traps_on_top := 0               # ...y las que saltaron nada más poder (alguien ya estaba dentro)
 var beacons_popped := 0             # balizas Nox reventadas
 var _cast_slot := -1                # ranura que se está lanzando ahora mismo (do_cast)
 var _spore_tick := 0.0
@@ -1075,7 +1082,10 @@ func cast_trap(f: Fighter, ab: Dictionary, at: Vector3, rad: float, beacon: bool
 	core.position = Vector3(0, 0.03, 0)
 	node.add_child(core)
 	main.add_child(node)
-	traps.append({"node": node, "armed": true, "left": float(ab.get("dur", 10.0)),
+	var arming := main.is_pvp()
+	if arming:
+		(node.get_child(1) as Node3D).visible = false   # sin aro hasta que se active
+	traps.append({"node": node, "armed": true, "live": not arming, "left": float(ab.get("dur", 10.0)),
 		"tick": 0.0, "rad": rad, "dmg": float(ab.get("dmg", 12.0)),
 		"stun": float(ab.get("stun", 0.0)), "every": float(ab.get("tick", 2.0)),
 		"tgt": int(ab.get("tgt", 99)), "beacon": beacon, "slow": float(ab.get("slow", 0.0)),
@@ -1129,8 +1139,13 @@ func cast_beacon(f: Fighter, ab: Dictionary, at: Vector3, rad: float) -> void:
 	beacons.append({"node": body, "hp": BEACON_HP, "rad": rad, "dur": float(ab.get("dur", 10.0)),
 		"dmg": float(ab.get("dmg", 8.0)), "every": float(ab.get("tick", 0.5)),
 		"slow": float(ab.get("slow", 0.5)), "col": ab["col"], "spent": false,
-		"team": f.team, "owner": f.id, "slot": _cast_slot})
+		"team": f.team, "owner": f.id, "slot": _cast_slot, "age": 0.0, "live": not main.is_pvp()})
 	_cap_owned(beacons, f, int(ab.get("act", 5)))
+
+
+## ¿Puede saltar ya una trampa o baliza puesta hace `age` s? Por equipos, solo tras PVP_ARM_TIME.
+static func can_trigger(age: float, pvp: bool) -> bool:
+	return not pvp or age >= PVP_ARM_TIME
 
 
 ## La baliza enemiga que tenga a mano alguien de `team`, para que la muela a golpes.
@@ -1143,13 +1158,18 @@ func beacon_in_reach(team: int, from: Vector3, r: float) -> Dictionary:
 	return {}
 
 
-func tick_beacons(_delta: float) -> void:
+func tick_beacons(delta: float) -> void:
 	for i in range(beacons.size() - 1, -1, -1):
 		var bc: Dictionary = beacons[i]
 		var node: Node3D = bc["node"]
 		if bc["spent"]:
 			continue
-		var near := not foes_in(int(bc["team"]), node.global_position, BEACON_TRIGGER, 1).is_empty()
+		bc["age"] = float(bc["age"]) + delta
+		var ready := can_trigger(float(bc["age"]), main.is_pvp())
+		if ready and not bc["live"]:
+			bc["live"] = true
+			vfx.flash(node.global_position + Vector3(0, 0.8, 0), bc["col"], 1.6, 0.25)   # ya está activa
+		var near := ready and not foes_in(int(bc["team"]), node.global_position, BEACON_TRIGGER, 1).is_empty()
 		if near or float(bc["hp"]) <= 0.0:
 			bc["spent"] = true
 			beacons_popped += 1
@@ -1187,11 +1207,17 @@ func tick_traps(delta: float) -> void:
 		var team := int(t["team"])
 		if t["armed"]:
 			t["age"] = float(t["age"]) + delta
+			if not can_trigger(float(t["age"]), main.is_pvp()):
+				continue          # por equipos, aún activándose: se ve, pero no salta
+			if not t["live"]:
+				t["live"] = true
+				(node.get_child(1) as Node3D).visible = true
+				vfx.spark(node.position + Vector3(0, 0.3, 0))
 			if foes_in(team, node.position, float(t["rad"])).is_empty():
 				continue          # armada sin caducar, como en el juego
 			t["armed"] = false
 			t["tick"] = 0.0
-			if float(t["age"]) <= 0.5:
+			if float(t["age"]) <= (PVP_ARM_TIME if main.is_pvp() else 0.0) + 0.5:
 				traps_on_top += 1
 			else:
 				traps_sprung += 1

@@ -17,7 +17,7 @@ var _moved := {}          # id de leyenda -> metros recorridos
 var _last := {}
 var _first_hit := -1.0
 var _hp0 := {}
-var _ammo_bad: Array = []    # incumplimientos de la munición (se informa el primero de cada leyenda)
+var _rules_bad: Array = []   # incumplimientos de la munición o de la activación de trampas
 var _ammo_spent := false     # alguien bajó de su máximo
 
 
@@ -35,7 +35,7 @@ func _ready() -> void:
 		_prev_hp[f.id] = f.hp()
 		var want := 0 if String(f.data()["id"]) == "ilusionista" else 3
 		if f.ammo_max != want:
-			_ammo_bad.append("%s con %d de munición máxima (debería %d)" % [f.display_name, f.ammo_max, want])
+			_rules_bad.append("%s con %d de munición máxima (debería %d)" % [f.display_name, f.ammo_max, want])
 
 
 func _physics_process(delta: float) -> void:
@@ -54,10 +54,13 @@ func _physics_process(delta: float) -> void:
 			_hurt[f.team] += float(_prev_hp[f.id]) - f.hp()
 		_prev_hp[f.id] = f.hp()
 		if f.ammo < 0 or f.ammo > f.ammo_max:
-			if _ammo_bad.size() < 4:
-				_ammo_bad.append("%s con %d/%d de munición" % [f.display_name, f.ammo, f.ammo_max])
+			if _rules_bad.size() < 4:
+				_rules_bad.append("%s con %d/%d de munición" % [f.display_name, f.ammo, f.ammo_max])
 		elif f.ammo < f.ammo_max:
 			_ammo_spent = true
+	for t in main.combat.traps:
+		if not t["armed"] and float(t["age"]) < Combat.PVP_ARM_TIME - 0.02 and _rules_bad.size() < 4:
+			_rules_bad.append("una trampa saltó a los %.2f s, antes de activarse" % float(t["age"]))
 	var rules: TeamMatch = main.team_mode.rules
 	if rules.state == "over" or _t >= _secs:
 		_finish(rules)
@@ -82,7 +85,7 @@ func _finish(rules: TeamMatch) -> void:
 		problems.append("nadie lanzó una definitiva: la carga no se llena")
 	if _first_hit < 0.0 or _first_hit > 45.0:
 		problems.append("tardan demasiado en encontrarse (primer golpe a %.0f s)" % _first_hit)
-	problems.append_array(_ammo_bad)
+	problems.append_array(_rules_bad)
 	if not _ammo_spent:
 		problems.append("nadie gastó munición: la básica no la usa")
 	var per := []
@@ -104,7 +107,7 @@ func _finish(rules: TeamMatch) -> void:
 	var shots: int = main.combat.soft_hits + main.combat.soft_misses
 	print("[SONDA] teledirigidos: %d aciertan, %d fallan (%.0f%% de acierto)" % [main.combat.soft_hits,
 		main.combat.soft_misses, 100.0 * main.combat.soft_hits / maxf(shots, 1.0)])
-	print("[SONDA] trampas eléctricas: %d puestas, %d saltan al caer encima de alguien, %d pisadas después · balizas Nox: %d puestas, %d reventadas" % [
+	print("[SONDA] trampas eléctricas: %d puestas, %d saltan nada más activarse, %d pisadas después · balizas Nox: %d puestas, %d reventadas" % [
 		int(main.combat.casts.get("trap", 0)), main.combat.traps_on_top, main.combat.traps_sprung,
 		int(main.combat.casts.get("beacon", 0)), main.combat.beacons_popped])
 	var walked := []

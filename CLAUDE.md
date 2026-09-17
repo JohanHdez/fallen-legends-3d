@@ -185,15 +185,15 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
   `world/map3d.gd` (suelo, bloqueadores, peñascos, decoración, tumbas, colisión, gas),
   `chars/character_factory.gd` (glTF, injerto de animaciones, corte de cabeza, armas, ojos, tinte,
   barras), `ui/debug_hud.gd` e insignias.
-- **Balance por equipos sin afinar** (28 partidas de bots con vida ×3, definitiva por carga,
-  munición, bots que rodean zonas, marca del señuelo y pistola ×1,6): peleas de 22-34 s. Tormentero
-  gana el 81 % y Caballero el 20 %; Rompemareas 28 %, Clérigo 36 %, Químico 40 %, Ilusionista y Rey
-  liche 50 %. La
-  **Trampa eléctrica no es una trampa**: su alcance (5 m) es su radio, así que salta al caer encima
-  de alguien (340 de 344). La Ilusionista gana 16 de 36 duelos 1v1 (8 antes de la pistola ×1,6)
-  pero ninguno contra Tormentero, Rey liche ni Rompemareas, dé lo que dé su pistola: falla la mitad,
-  los esqueletos paran sus balas y su bot pelea a 5,6 m pudiendo disparar a 12,8. **Aturdir en el 3D solo impide moverse**; en el 2D tampoco deja atacar
-  (`player.gd`: "no se mueve ni ataca"). Nadie muere en el gas. Los bots apenas esquivan.
+- **Balance por equipos** (28 partidas de bots con vida ×3, definitiva por carga, munición, bots que
+  rodean zonas, marca del señuelo, pistola ×1,6 y trampa y baliza que tardan 3 s en activarse): todas
+  las leyendas entre el 30 % (Caballero) y el 56 % (Rompemareas), pero **las peleas 1v1 duran ~57 s**
+  y las 4v4 ~43 s; si con personas se hacen largas, bajar la vida a ×2,5 (medido antes: 4v4 de 46 a
+  31 s). La Ilusionista gana 16-17 de 36 duelos 1v1 (8 antes de la pistola ×1,6), casi nunca contra
+  Tormentero, Rey liche ni Rompemareas: falla la mitad, los esqueletos paran sus balas y su bot
+  pelea a 5,6 m pudiendo disparar a 12,8. **Aturdir en el 3D solo impide moverse**; en el 2D
+  tampoco deja atacar (`player.gd`: "no se mueve ni ataca"). Nadie muere en el gas. Los bots
+  apenas esquivan.
 - **Horda**: al reaparecer vuelves con `PLAYER_HP` (210) sea cual sea tu leyenda (se conserva para
   no descuadrar las trazas; arreglarlo es cambiar una línea en `_tick_player_death`). No hay forma
   de perder: las oleadas no acaban.

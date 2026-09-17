@@ -52,6 +52,18 @@ Duelos de la Ilusionista (6 semillas contra cada rival, con la marca) según el 
 Se elige ×1,6. El daño no arregla el Tormentero ni el Rey liche: la trampa la deja aturdida dentro
 (en el 3D aturdir solo impide moverse) y los esqueletos paran las balas.
 
+Activación de trampa y baliza (28 partidas y 36 duelos de la Ilusionista por valor):
+
+| | al momento | 2 s | **3 s** |
+|---|---|---|---|
+| Pelea 1v1 / 2v2 / 3v3 / 4v4 | 22 / 27 / 30 / 34 s | 55 / 43 / 42 / 44 s | 57 / 35 / 43 / 43 s |
+| Daño de la Trampa eléctrica | 15 % | 2 % | 2 % |
+| Victorias Tormentero / Químico / Rompemareas / Clérigo | 81 / 40 / 28 / 36 % | 45 / 80 / 72 / 18 % | 52 / 50 / 56 / 45 % |
+| Victorias Ilusionista / Rey liche / Caballero | 50 / 50 / 20 % | 39 / 52 / 40 % | 50 / 52 / 30 % |
+| Duelos de la Ilusionista | 16 de 36 | 17 de 36 | — |
+
+Se eligen 3 s: el reparto más igualado. Las peleas 1v1 entre bots pasan a durar casi un minuto.
+
 | Regla | Valor | Origen |
 |---|---|---|
 | Partida | al mejor de 3: gana quien se lleva 2 rondas | usuario |
@@ -64,6 +76,7 @@ Se elige ×1,6. El daño no arregla el Tormentero ni el Rey liche: la trampa la 
 | Básicas teledirigidas | pueden fallar: vuelan recto, corrigen solo en los últimos 2 m a 40°/s, impactan por contacto y se apagan en su alcance | usuario |
 | Munición de la básica | 3 disparos que vuelven de uno en uno (1,0 s; Rey liche 1,15; Rompemareas 1,4): −40 % de daño sostenido a distancia, −20 % cuerpo a cuerpo; la Ilusionista sin límite; barra bajo tu vida y arcos en el botón; la carga de la definitiva no cambia | usuario |
 | Pistola de la Ilusionista | ×1,6 (9 → 14,4); solo por equipos | usuario |
+| Trampa eléctrica y Baliza Nox | tardan 3 s en activarse (se ven, pero no saltan); al activarse, aro y chispazo | usuario (2026-09-17) |
 | Marca del señuelo | quien rompe un señuelo queda marcado 5 s para el equipo de la Ilusionista: contorno rojo a través de todo, no puede esconderse, los bots van a por él | usuario |
 | Bots | rodean trampas, balizas, nubes, tormentas y espinas rivales, y salen si les pillan dentro; con munición guardan el último disparo para cuando el rival está a menos del 70 % del alcance | diseño |
 | Regeneración | tras 10 s sin daño, 8 % de la vida máxima por segundo, también en la Horda | usuario (espera) y `player.REGEN_RATE` del 2D (ritmo) |
