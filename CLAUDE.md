@@ -11,8 +11,10 @@ independientes**: comparten mundo, leyendas y balance, pero ninguno depende del 
 El 2D **no se publicará en Android**; el 3D sí, con `com.fallenlegends.proto3d` (decidido, no se
 cambia). Sin red por ahora.
 
-Modos (menú de inicio o `--mode=`): **Horda** (oleadas de cinco especies) y **1v1, 2v2, 3v3, 4v4**
-contra bots **al mejor de 3 rondas por eliminación**, sin reaparecer dentro de la ronda, con vida
+Modos (menú de inicio o `--mode=`): **Horda** (oleadas de cinco especies, solo o con 1-3 compañeros
+bot, con jefe-leyenda y criaturas que buscan; se pierde si cae todo el equipo) y **1v1, 2v2, 3v3, 4v4**
+contra bots **al mejor de 3 rondas por eliminación**; en los dos, un compañero agachado a tu lado te
+levanta o vuelves solo a los 15/30/60 s. Por equipos, con vida
 ×3, definitiva por carga, básicas que pueden fallar, munición en la básica (menos la Ilusionista) y
 área limpia al 65 % (reglas en el README). 7 leyendas
 en rotación con 21 habilidades (más 3 retiradas), ciclo día/noche, gas que cierra el mapa,
@@ -35,6 +37,8 @@ godot --headless --path . -s tests/test_team_match.gd                        # u
 godot --headless --fixed-fps 60 --path . -- --probe=rocks_probe --secs=60     # ¿alguien se mete en las piedras?
 godot --headless --fixed-fps 60 --path . -- --mode=4v4 --autoplay --log --probe=match_probe   # partida de bots entera
 godot --headless --fixed-fps 60 --path . -- --mode=2v2 --legend=2 --autoplay --probe=decoy_probe  # marca al romper un señuelo
+godot --headless --fixed-fps 60 --path . -- --team=4 --autoplay --down-one=20 --probe=horde_probe   # Horda en equipo y reanimación
+godot --headless --fixed-fps 60 --path . -- --legend=5 --nozone --zombies=0 --probe=minion_probe      # órdenes del Rey liche
 tools/sync_2d.sh [--copy]                        # deriva frente al 2D (copias literales y balance)
 tools/build.sh android | android-release | web   # exportar (docs/DESPLIEGUE.md); nunca sin tools/check.sh antes
 ```
@@ -45,7 +49,7 @@ godot --path . --resolution 1280x720 -- --mode=menu --shot=/tmp/menu.png --wait=
 godot --path . --resolution 1600x720 -- --mode=2v2 --autoplay --touch --shot=/tmp/m.png --wait=600  # equipos en móvil
 ```
 Flags de prueba (todos en README § "Opciones útiles para probar"): `--mode`, `--legend`,
-`--autoplay`, `--rounds`, `--roundtime`, `--autocast`, `--probe`, `--near`, `--zombies`, `--wave`,
+`--autoplay`, `--team`, `--down-one`, `--expect-defeat`, `--rounds`, `--roundtime`, `--autocast`, `--probe`, `--near`, `--zombies`, `--wave`,
 `--boss`, `--dianas`, `--cd`, `--nozone`, `--zonewait`, `--zonefast`, `--cycle`, `--night`,
 `--nodecor`, `--noshadow`, `--touch`, `--roster`, `--fxtest`, `--bench`, `--log`, `--animlog`,
 `--sporelog`, `--dashlog`, `--meleelog`, `--rocklog`, `--dbg`.
@@ -55,6 +59,8 @@ ejecuciones iguales den la MISMA traza. Así se comprobó que partir `main.gd` n
 se graba `--fixed-fps 60 --legend=N --autocast --near=4 --zombies=14 --log --meleelog --dashlog
 --sporelog --shot=/tmp/x.png --wait=1200` antes y después y se compara con `diff` (quitando `fps=`).
 Usa ese método en cualquier refactor. Un sorteo por pesos se comprueba aparte, con `randomize()`.
+Ojo: `Vfx` sortea con el MISMO `rng` (el zigzag de los rayos, por ejemplo), así que añadir un efecto
+visual también cambia la traza de quien lo lance: pasó al poner un rayo por víctima en la Tormenta.
 
 **Rendimiento** solo con la ventana en primer plano (macOS estrangula la de fondo a 3-4 FPS, y las
 ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esqueletos a 144 FPS.
@@ -63,11 +69,18 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
 
 | Fichero | Clase | Qué es |
 |---|---|---|
-| `main.gd` | `Main` | Escena raíz (`main.tscn`): elige modo, construye el mapa 3D, cámara, control del jugador (teclado/ratón/táctil), la Horda (oleadas, especies, jefe, campo de flujo, IA de criaturas), gas, día/noche, barras, insignias y HUD de depuración. ~2.900 líneas |
+| `main.gd` | `Main` | Escena raíz (`main.tscn`): elige modo, construye el mapa 3D, cámara, control del jugador (teclado/ratón/táctil, botón de agacharse), gas (en la Horda se para al 60 %), día/noche, barras, insignias y HUD de depuración. ~2.500 líneas |
+| `game/horde.gd` | `Horde` | La Horda: oleadas (escalan con el equipo), especies, jefe-leyenda (un `Fighter` Rompemareas del equipo 0 con `BotBrain`, sin regeneración), un campo de flujo por leyenda viva, IA de criaturas con estados (`wander` → `chase` → `search`) según `CreatureSenses`, gritos y sus bajas con autor. `main.zombies` es un alias de `horde.zombies` (vacío fuera de la Horda) |
+| `game/minions.gd` | `Minions` | Esqueletos del Rey liche: órdenes Atacar / Reagrupar / Emboscada (`Fighter.minion_order`, `ambush_at`), formación, enterrarse (`"hidden"` en su ficha: `foes_in` los salta) y su IA por la rejilla. Lo llama `Combat.tick_allies` |
+| `game/creature_senses.gd` | `CreatureSenses` | Pura: vista (12/8 m, línea de visión), escondido (1,5 m; 4 m si ya te persigue), grito a 30 m, tiempos de perder el rastro y rebuscar |
+| `game/horde_mode.gd` | `HordeMode` | La Horda en equipo (`--team`, selector del menú): compañeros bot, reanimaciones, derrota al caer todo el equipo, Revancha/Menú |
+| `game/revive.gd` | `Revive` | Pura: reglas del derribo (45 s en el suelo, 3 s agachado a 1,4 m para levantarlo, remate por daño, arrastre al 25 %) |
+| `game/revive_system.gd` | `ReviveSystem` | Aplica `Revive` cada fotograma en la Horda y en PvP: levanta, desangra, mata y pone el letrero; `respawn_at` lo pone cada modo |
+| `ui/horde_hud.gd` | `HordeHud` | Vida del equipo, avisos de caída y reanimación, pantalla final de la Horda |
 | `data/legend_data.gd` | `LegendData` | `ABILITIES`, `LEGENDS`, `PLAYABLE`, `SPECIES`, `PX`, `PVP_AMMO` y `PVP_BASIC_DMG` (munición y daño de la básica por equipos), rutas de modelos y listas de animaciones. `main.gd` tiene alias con los mismos nombres |
 | `game/fighter.gd` | `Fighter` | Una leyenda en juego (tuya o de bot): cuerpo, modelo, equipo, `rec` (ficha de objetivo), estado de lanzador, `hp_mult`, definitiva por carga (`ult_*`), munición de la básica (`ammo_*`, 0 = sin límite), daño de la básica por equipos (`basic_dmg_mult`) y marca por romper un señuelo (`marked_t`, `mark_team`). Quien la maneja solo escribe `wish`, `run`, `crouch`, `holding_basic` |
 | `game/combat.gd` | `Combat` | Las 13 mecánicas para cualquier Fighter, objetivos por equipo, daño con autor, empujón y tirón, esbirros, señuelos, esporas, regeneración, movimiento de leyendas, limpieza entre rondas |
-| `fx/vfx.gd` | `Vfx` | Partículas, destellos, rayos, aros, discos, nubes, polvo, espinas, burbuja, cadena; vida de lo temporal |
+| `fx/vfx.gd` | `Vfx` | Partículas, destellos, rayos, aros, discos, esferas de las trampas puestas (`electric_orb`, `nox_orb`, `tick_orb`), nubes, polvo, espinas, burbuja, cadena; vida de lo temporal |
 | `fx/mark_fx.gd` | `MarkFx` | Contorno rojo a través de muros (stencil, `material_overlay`) de quien rompe un señuelo |
 | `world/map_layout.gd` | `MapLayout` | Pura: transponer la rejilla, huella de una malla, encajar rocas en su celda, elegir celdas de peñascos |
 | `game/game_modes.gd` | `GameModes` | Pura: tabla de modos, zonas de salida opuestas, reparto de leyendas, celda de reaparición |
@@ -76,6 +89,7 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
 | `game/bot_brain.gd` | `BotBrain` | Cerebro de bot (del 2D): objetivo visible, distancia por leyenda, huida, gas, habilidades por tipo, rutas; rodea las zonas rivales (`steer_around`) y administra la munición (`should_shoot`) |
 | `game/nav_grid.gd` | `NavGrid` | `AStarGrid2D` de 8 direcciones sin cortar esquinas, para los bots |
 | `ui/mode_menu.gd` | `ModeMenu` | Menú de inicio (modo y leyenda); guarda la elección en `Engine` meta y recarga la escena |
+| `ui/minimap.gd` | `Minimap` | Minimapa de arriba a la derecha: terreno de un píxel por celda, gira con la cámara, compañeros, gas y enemigos que ve tu equipo |
 | `ui/match_hud.gd` | `MatchHud` | Rondas, leyendas en pie, reloj, bajas recientes, carteles de ronda, pantalla final |
 | `ui/ammo_bar.gd` | `AmmoBar` | Tu munición: segmentos bajo tu vida que miran a la cámara, parpadeo y sonido al disparar sin munición |
 | `ui/pause_menu.gd` | `PauseMenu` | ☰ / P: Seguir, Reiniciar, Menú (árbol en pausa, `PROCESS_MODE_ALWAYS`) |
@@ -138,7 +152,9 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
 4. **Sincronía con el 2D**: `map_builder.gd` y `dungeon_gen.gd` no se editan aquí; se traen con
    `tools/sync_2d.sh --copy`. Toda cifra de balance sale de `data/*.tres` del 2D; una desviación
    lleva comentario junto al número y fila en el README. Desviaciones vivas: Enganche (recarga 20 s,
-   alcance 1200 px), Sanación ×3, Muro de espinas ×3, regeneración a los 10 s (el 2D, 4 s).
+   alcance 1200 px), Sanación ×3, Muro de espinas ×3, regeneración a los 10 s (el 2D, 4 s), los cinco
+   clones de la Fiesta con vida ×3 (el 2D los deshace de un golpe) y el **Trasgo Nox**, que en el 2D
+   se llama "Químico" (el `id` sigue siendo `quimico`).
 5. **Determinismo**: nada de `randomize()` en el juego. Lógica pura nueva → prueba en
    `tests/test_*.gd` (`extends SceneTree`, `print("FALLO: …")`, `quit(1)`); comportamiento en partida
    → sonda en `tests/*_probe.gd` enganchada con `--probe` y añadida a `PROBES` de `tools/check.sh`.
@@ -180,27 +196,30 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
 - Plugins, conectores, cadena de herramientas y licencias: `docs/DESPLIEGUE.md`.
 
 ## Deuda y trampas conocidas
-- **`main.gd` sigue grande** (~2.900). Siguientes extracciones, una por vez con trazas idénticas:
-  `game/horde.gd` (oleadas, especies, jefe, campo de flujo, IA de criaturas, `_kill_zombie`),
+- **`main.gd` sigue grande** (~2.600; la Horda ya salió a `game/horde.gd` con las 13 trazas
+  idénticas). Siguientes extracciones, una por vez con trazas idénticas:
   `world/map3d.gd` (suelo, bloqueadores, peñascos, decoración, tumbas, colisión, gas),
   `chars/character_factory.gd` (glTF, injerto de animaciones, corte de cabeza, armas, ojos, tinte,
   barras), `ui/debug_hud.gd` e insignias.
-- **Balance por equipos** (28 partidas de bots con vida ×3, definitiva por carga, munición, bots que
-  rodean zonas, marca del señuelo, pistola ×1,6 y trampa y baliza que tardan 3 s en activarse): todas
-  las leyendas entre el 30 % (Caballero) y el 56 % (Rompemareas), pero **las peleas 1v1 duran ~57 s**
-  y las 4v4 ~43 s; si con personas se hacen largas, bajar la vida a ×2,5 (medido antes: 4v4 de 46 a
-  31 s). La Ilusionista gana 16-17 de 36 duelos 1v1 (8 antes de la pistola ×1,6), casi nunca contra
+- **Balance por equipos** (28 partidas de bots, 2026-09-17, ya con reanimaciones y los esqueletos
+  nuevos): victorias entre el 27 % (Clérigo) y el 70 % (Trasgo Nox, el antiguo Químico); Rompemareas 61 %, Tormentero 55 %,
+  Rey liche 50 %, Caballero 40 %, Ilusionista 39 %. **Las rondas se alargan mucho con las
+  reanimaciones**: 1v1 66 s, 2v2 71 s, 3v3 90 s, 4v4 62 s (antes 63/40/48/47), y las definitivas pasan
+  de 360 a 882 por torneo. Esos números son de ANTES del derribo (2026-09-17): ahora quien cae queda
+  45 s en el suelo y muere si nadie lo levanta, así que hay que volver a medir el torneo. El usuario
+  pidió expresamente partidas más largas, así que alargarlas no es un problema en sí. La Ilusionista gana 16-17 de 36 duelos 1v1 (8 antes de la pistola ×1,6), casi nunca contra
   Tormentero, Rey liche ni Rompemareas: falla la mitad, los esqueletos paran sus balas y su bot
   pelea a 5,6 m pudiendo disparar a 12,8. **Aturdir en el 3D solo impide moverse**; en el 2D
   tampoco deja atacar (`player.gd`: "no se mueve ni ataca"). Nadie muere en el gas. Los bots
   apenas esquivan.
-- **Horda**: al reaparecer vuelves con `PLAYER_HP` (210) sea cual sea tu leyenda (se conserva para
-  no descuadrar las trazas; arreglarlo es cambiar una línea en `_tick_player_death`). No hay forma
-  de perder: las oleadas no acaban.
+- **Dificultad de la Horda sin probar con personas** (2026-09-17): con bots, solo se cae en las
+  oleadas 3-5 y un equipo de 4 cae en la 5 (el jefe) dos de cada tres veces. Perillas en `Horde`:
+  `CREATURE_DMG`, `HP_PER_WAVE`, `STAGE_*`, `BOSS_LEGEND_HP/DMG`. Las trazas deterministas de las
+  leyendas que morían en 20 s (1, 2, 7, 8 y 9, y ahora el jefe) acaban en derrota.
 - **Solo hay 2 equipos por partida**: el combate ya admite cualquier número (`team` entero,
   `foes_in` = otro equipo), pero `TeamMatch`, `GameModes.spawn_areas`/`pick_legends`, `TeamMode`
   y `MatchHud` están escritos para Azul contra Rojo.
 - **`project.godot` dice `config/features=("4.3", …)`** con motor 4.7.2 (el editor lo actualiza).
 - **`--shot` en headless** imprime `ERROR: Parameter "t" is null`; `tools/check.sh` lo filtra.
-- **Sin botón táctil para agacharse**; **sin icono de lanzador**; **sin keystore de release**;
+- **Sin icono de lanzador**; **sin keystore de release**;
   **sin atribución CC-BY-SA visible en el juego**; las insignias de 64 px pesan 19 MB.

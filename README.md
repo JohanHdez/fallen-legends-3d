@@ -50,14 +50,36 @@ headless, se salta y se juega la Horda como siempre; `--mode=` elige directament
 
 | Modo | Qué es |
 |---|---|
-| **Horda** | Oleadas de criaturas sin fin, lo de abajo. |
+| **Horda** | Oleadas de criaturas, **solo o con 1-3 compañeros bot** (selector "Equipo" del menú). Se pierde si cae todo el equipo. |
 | **1v1, 2v2, 3v3, 4v4** | Tú más compañeros bot contra rivales bot, **al mejor de 3 rondas**. |
+
+**Derribo y reanimaciones** (Horda y PvP; petición del usuario, 2026-09-17, cifras del 2D): a 0 de
+vida una leyenda **no muere: queda DERRIBADA**, arrastrándose a un cuarto de su velocidad, sin atacar
+y con un letrero "¡DERRIBADO! N s" encima. Tiene **45 s** para que **un compañero en pie se agache a
+su lado (a menos de 1,4 m) 3 s**, y se levanta con media vida y 3 s de inmunidad (burbuja dorada); si
+el que ayuda se va, el progreso baja al mismo ritmo. Mientras la levantan, la cuenta se para. **Los
+golpes rematan**: el daño equivalente a 1,5 veces su vida máxima le quita los 45 s enteros (un golpe
+normal, ~1 s). Si se le acaba la cuenta, o no queda nadie de su equipo en pie, **muere y la baja es de
+quien la derribó**; muerta ya no se levanta: en PvP vuelve en la ronda siguiente y en la Horda al
+empezar la oleada siguiente. Antes volvía sola a los 15/30/60 s; eso se quitó a petición del usuario
+("me gusta que duren un poco las partidas"). Los bots van a levantar a un compañero si no tienen un
+rival a menos de 8 m, y un derribado se arrastra hacia el compañero en pie más cercano. Animaciones:
+al no haber ninguna de gatear en la Universal Animation Library, el derribado usa la de nadar pegada
+al suelo (`Swim_Fwd`/`Swim_Idle`) y quien levanta se arrodilla (`Fixing_Kneeling`). Medido con bots
+(4v4): 12 derribos, 4 levantados (12,6 s de media derribados) y 2 muertos desangrados.
+
+**Horda en equipo**: tus compañeros salen a tu lado con leyendas distintas. Las criaturas persiguen a
+la leyenda que tengan más cerca, y las oleadas crecen como en el 2D: 3 criaturas más por compañero y
+8 más a la vez. Las bajas de tus compañeros no cuentan para tus insignias. Por fin la Horda respeta la
+leyenda elegida en el menú (antes salías siempre con el Tormentero).
 
 Reglas por equipos (a petición del usuario, 2026-09-16):
 
-- **Una ronda la gana el equipo que deja al rival sin nadie en pie.** Dentro de la ronda **no se
-  reaparece**: si caes, la cámara sigue a un compañero vivo hasta que acaba. La partida la gana el
-  primero que se lleva **2 rondas**; si caen los dos equipos a la vez, la ronda no es de nadie.
+- **Una ronda la gana el equipo que deja al rival sin nadie en pie a la vez.** Un derribado sigue
+  contando como caído: vuelve solo si un compañero lo levanta (ver **Derribo y reanimaciones**,
+  arriba), y si muere ya no vuelve hasta la ronda siguiente; mientras tanto la cámara sigue a un
+  compañero vivo. La partida la gana el primero que se lleva
+  **2 rondas**; si caen los dos equipos a la vez, la ronda no es de nadie.
 - Entre rondas hay **4 s de descanso** con el cartel del resultado; después todo lo que quedó en el
   suelo desaparece, cada leyenda vuelve entera a su zona de salida y el gas se reinicia.
 - **Ritmo de pelea** (a petición del usuario, 2026-09-16, tras medir peleas de ~7 s):
@@ -81,12 +103,12 @@ Reglas por equipos (a petición del usuario, 2026-09-16):
 
     | Leyenda | Básica | Vuelve 1 disparo cada | Daño sostenido de la básica |
     |---|---|---|---|
-    | Tormentero, Químico, Clérigo | cada 0,6 s | 1,0 s | −40 % |
+    | Tormentero, Trasgo Nox, Clérigo | cada 0,6 s | 1,0 s | −40 % |
     | Rey liche | cada 0,7 s | 1,15 s | −40 % |
     | Caballero esqueleto | cada 0,8 s | 1,0 s | −20 % |
     | Rompemareas | cada 1,1 s | 1,4 s | −20 % |
     | Ilusionista | cada 0,18 s | sin límite | ×1,6 (ver abajo) |
-  - **Trampa eléctrica y Baliza Nox tardan 3 s en activarse** (ver "Baliza Nox del Químico").
+  - **Trampa eléctrica y Baliza Nox tardan 3 s en activarse** (ver "Baliza Nox del Trasgo Nox").
   - **Pistola de la Ilusionista ×1,6** por equipos (petición del usuario; 9 → 14,4 por bala; en la
     Horda sigue en 9): necesitaba ~70 balas para tumbar a cualquiera y ganaba 8 de 36 duelos. Medido
     con 36 duelos por valor: ×1,3 gana 13, ×1,6 gana 16 y ×2,0 gana 19, pero con ×2,0 ya gana el
@@ -131,9 +153,19 @@ raro, lento y durísimo, para que las oleadas tardías cambien de forma y no sol
 De las **tumbas del cementerio solo salen esqueletos** (`"grave": true`): un licántropo saliendo de
 una lápida no se sostiene. El resto entra por los bordes del mapa, igual que la Horda del juego.
 
-Persiguen al jugador con un **campo de flujo** BFS sobre la rejilla (una sola búsqueda cada 0,4 s
-sirve para todos, en vez de una ruta por bicho). Se separan entre ellos, muerden al alcance y la
-oleada siguiente sale 4 s después de limpiar la anterior.
+Persiguen a la leyenda del equipo más cercana con un **campo de flujo** BFS sobre la rejilla (una
+sola búsqueda cada 0,4 s, con todas las leyendas vivas de fuente, sirve para todos, en vez de una
+ruta por bicho). Se separan entre ellos, muerden al alcance y la oleada siguiente sale 4 s después de
+limpiar la anterior.
+
+**El jefe** (oleada 5 y sus múltiplos, o `--boss`) es una **leyenda Rompemareas llevada por un bot del
+bando de la horda**, como el jefe-leyenda del 2D: usa sus poderes (mandoble cargado, Enganche que te
+arrastra, Ancla clavada). Antes era un zombi grande con su modelo que solo pegaba de cerca (el
+usuario: "nunca usó sus poderes contra mí"). Vida ×4 la del Rompemareas más un 20 % por compañero,
+todo su daño ×1,5 (2D), un 30 % más grande, **sin regeneración** (con 1.700 de vida el 8 %/s eran
+138 por segundo) y no se reanima. La oleada no acaba hasta tumbarlo. Medido con bots: cuatro lo
+tumban en 33 s; dos caen en 15 s (su mandoble cargado pega ~190): se ajusta en la etapa de
+dificultad.
 
 Cada una lleva **brasas en los ojos** a su escala y con su color (naranja el esqueleto, ámbar el
 licántropo, verde el duende, rojo el guardián). De noche es lo único que las delata a distancia, y
@@ -259,12 +291,44 @@ infectado (contando 7 como mucho), y **al morir un infectado los bultos revienta
 a los que estén a 5 m y el daño se multiplica por 1,25, hasta un techo de 60/s. También contagia
 por cercanía a 2 m en cada tick. Los jefes resisten.
 
+## Órdenes de los esqueletos del Rey liche
+
+Petición del usuario (2026-09-17; `game/minions.gd`). Con esqueletos vivos aparece el **botón de
+órdenes** (▲ Atacar, ● Reagrupar, ▼ Emboscada, con la orden puesta debajo), y en teclado la **F**:
+
+- **Tocar** (o pulsar F): alterna **Atacar** y **Reagrupar**.
+- **Arrastrar y soltar** (o mantener F y apuntar con el ratón): **Emboscada** donde sueltes, hasta 12 m,
+  con un aro de 3 m que marca la zona.
+
+| Orden | Qué hacen |
+|---|---|
+| **Atacar** (la de partida) | cada uno va al enemigo visible más cercano a él, esté donde esté, rodeando obstáculos; si no hay nadie, vuelve con el Rey |
+| **Reagrupar** | le siguen en dos anillos (4 a 2 m y 6 a 3,5 m), separados unos de otros; golpean a quien tengan a 2 m, sin perseguir |
+| **Emboscada** | van al punto, se reparten en 3 m y **se entierran**: medio hundidos, sin chocar, translúcidos para tu equipo e **invisibles para el otro bando** (ni bots, ni teledirigidos, ni zonas, ni criaturas los ven). **Si un enemigo pasa a 4 m de cualquiera, salen todos y pasan a Atacar** |
+
+Antes iban en línea recta al enemigo visible a menos de 18 m (se atascaban en las rocas) y, sin nadie,
+se quedaban quietos donde nacían. Ahora andan a 3,1 m/s por la rejilla, los nuevos obedecen la orden
+puesta, y por equipos tienen vida ×3 como las leyendas (180). Los bots Rey liche mandan Atacar
+mientras pelean y Reagrupar cuando huyen; no emboscan. `tests/minion_probe.gd`: Atacar llega a una
+diana a 20 m en 5,6 s, Reagrupar los deja a 2,9 m de media tras andar 20 m, la emboscada los entierra
+en 4 s y salen a Atacar en cuanto aparece alguien a su lado.
+
 ## Señuelos del Ilusionista
 
 Repiten tu desplazamiento girado a su propia orientación (SPREAD) o salen de largo (FORWARD),
 y **copian tu animación**: si conjuras, conjuran. **Sin tinte a propósito** (petición del usuario):
 el `decoy.gd` del juego los pinta de violeta para que TÚ los distingas, pero aquí la idea es que
-el enemigo no sepa cuál eres. Son **inmunes a las esporas** y un solo golpe los disipa.
+el enemigo no sepa cuál eres. Son **inmunes a las esporas**.
+
+**Si la derriban, sus señuelos también lo parecen** (petición del usuario, 2026-09-17): llevan **su
+mismo letrero** (el nombre, y "¡DERRIBADO! N s" cuando cae), **su misma animación** —también la de
+arrastrarse—, **se arrastran a su paso** (los de largo dejan de correr) y **se quedan sin barra de
+vida** igual que ella. Sin eso, el letrero y la barra decían al momento cuál era la de verdad.
+
+**Cuánto aguantan**: un solo golpe disipa el **Señuelo** (la táctica), como en el 2D. Los **cinco
+clones de la Fiesta**, en cambio, tienen **vida ×3 como las leyendas** (decisión del usuario,
+2026-09-17: querían que duraran sus 20 s; con un golpe duraban 5,5 s de media). Medido ahora:
+**14,6-17,7 s de media** por clon.
 
 **Romper un señuelo marca a quien lo rompió** (idea del usuario, 2026-09-16; el 2D no lo tiene):
 durante **5 s** el equipo de la Ilusionista lo ve con un **contorno rojo a través de muros, rocas y
@@ -275,9 +339,23 @@ cuenta atrás. El contorno (`fx/mark_fx.gd`) son dos pasadas en `material_overla
 escribe en el stencil sin mirar la profundidad y el borde, engordado en píxeles de pantalla, se
 pinta solo fuera de ella. Funciona en Forward+ y en Compatibilidad (móvil).
 
-## Baliza Nox del Químico
+## Rayos del Tormentero
 
-Con `beacon.gd` del juego: un **barril de 60 de vida que bloquea el paso**. Espera dormido y lo
+La **Trampa eléctrica** puesta es una **esfera eléctrica que flota** sobre su aro, con cuatro brazos
+de plasma saltándole alrededor (petición del usuario, 2026-09-17; antes era un disco pequeño en el
+suelo que no se leía). Los brazos se rehacen con senos del reloj, no con el `rng`, para no cambiar las
+trazas deterministas. Cada descarga suelta un rayo del cielo sobre cada víctima y **suena**
+(`shock.ogg` de Flare, el mismo del 2D). La **Tormenta eléctrica** tira siete rayos al caer y,
+además, **un rayo con trueno sobre cada enemigo que siga dentro** en el golpe y en cada descarga de
+su campo (cada 2 s durante 10 s; `thunder.ogg`). Petición del usuario, 2026-09-17. Ojo con el
+determinismo: los rayos sortean su zigzag con el `rng` de la partida, así que añadir rayos cambia la
+traza del Tormentero (las demás salen iguales).
+
+## Baliza Nox del Trasgo Nox
+
+Con `beacon.gd` del juego: una **esfera de 60 de vida apoyada en el suelo que bloquea el paso**
+(petición del usuario, 2026-09-17; antes era un poste). Al activarse se enciende y **empieza a echar
+humo verde**, así que se ve de lejos que ya está viva. Espera dormido y lo
 despierta un enemigo a 2 m **o cualquier golpe** — las criaturas la muelen a golpes si la tienen a
 mano. Al reventar suelta humo Nox de 5 m durante 10 s: 8 de daño cada 0,5 s y **velocidad a la
 mitad**. 3 cargas, una cada 10 s, hasta 5 puestas.
@@ -286,7 +364,7 @@ mitad**. 3 cargas, una cada 10 s, hasta 5 puestas.
 2026-09-17; en la Horda y en el 2D saltan al momento). Mientras se activan se ven pero no saltan;
 al activarse la trampa enseña su aro con un chispazo y la baliza da un destello. Antes el Tormentero
 lanzaba la trampa encima del rival y saltaba en el acto (340 de 344): era un aturdimiento seguro y
-ganaba el 81 %. Medido con 28 partidas: con 2 s bajaba al 45 %, pero Químico y Rompemareas subían
+ganaba el 81 %. Medido con 28 partidas: con 2 s bajaba al 45 %, pero el Trasgo Nox y el Rompemareas subían
 al 80 % y 72 %; con 3 s todas las leyendas quedan entre el 30 % y el 56 %. Contra: las peleas se
 alargan (1v1 de 22 a 57 s, 4v4 de 34 a 43 s).
 
@@ -344,9 +422,11 @@ de juego"). Daña a todas las leyendas y criaturas que pille fuera. `--nozone` l
 
 El gas **está en el borde del mapa desde el primer segundo**: el área limpia arranca siendo el
 círculo inscrito en el mapa, así que las cuatro esquinas ya son gas. A los **2 minutos** empieza a
-cerrarse a 0,24 m/s —poco a poco, unos 3,7 min hasta el final— y mientras encoge **el centro se va
-desplazando** hacia un punto sorteado: si solo encogiera, la partida acabaría siempre en el mismo
-sitio y el cementerio y las cuevas dejarían de existir a partir de la mitad.
+cerrarse a 0,24 m/s y mientras encoge **el centro se va desplazando** hacia un punto sorteado: si
+solo encogiera, la partida acabaría siempre en el mismo sitio y el cementerio y las cuevas dejarían
+de existir a partir de la mitad. **En la Horda se para al 60 % del radio inicial** (unos 38 m,
+alcanzados en ~1,8 min; petición del usuario, 2026-09-17: "no es necesario que la zona avance tanto
+en el modo zombie"); por equipos sigue cerrando hasta 10 m.
 
 Dentro del gas: 7 de daño por segundo, y la pantalla se **tiñe de violeta por los bordes** con un
 latido. Es viñeta y no un rectángulo plano a propósito: teñir el centro mientras te están matando
@@ -361,6 +441,24 @@ Dos cosas que costaron una vuelta cada una:
   violáceo y solo el último palmo tiene brillo.
 
 Sondas: `--zonewait=N` acorta la espera y `--zonefast=N` acelera el cierre.
+
+## Minimapa
+
+Arriba a la derecha, un cuadro de 190 px (petición del usuario, 2026-09-17) con el terreno alrededor
+de tu leyenda: **gira con la cámara**, así que lo que tienes delante queda arriba. Tú eres la **flecha
+blanca** del centro (naranja si te derriban), tus compañeros **puntos azules** (naranjas si están
+derribados), el borde del área limpia es el **aro violeta**, y los enemigos salen en **rojo**:
+
+- los que **ve tu equipo**: a 23,4 m o menos de ti o de un compañero que no haya muerto (lo mismo que
+  ve un bot) y sin esconderse (agachado en hierba alta o invisible por la Fiesta de clones no sale);
+- los **marcados** por romper un señuelo, con un aro, estén donde estén;
+- **quien acaba de atacar** (`spotted`), esté donde esté: disparar te delata también en el mapa.
+
+Lo que cae fuera del cuadro se pega al borde en su dirección. En la Horda salen igual las criaturas y
+el jefe. El terreno es una imagen de un píxel por celda hecha al empezar (suelo, hierba alta, agua y
+lo que bloquea), y el mapa se redibuja 20 veces por segundo, no en cada fotograma. Las bajas recientes
+(PvP) y el panel del equipo (Horda) van justo debajo. Código: `ui/minimap.gd`; pruebas:
+`tests/test_minimap.gd` y `tests/minimap_probe.gd`.
 
 ## Cubrirse y esconderse
 
@@ -382,10 +480,34 @@ Sondas: `--zonewait=N` acorta la espera y `--zonefast=N` acelera el cierre.
   altas y a mayor escala, para que se vea de lejos que ahí cabe alguien.
 - **Agacharse con Ctrl**: frena al 45 %, baja la cámara y usa las animaciones `Crouch_Idle` /
   `Crouch_Fwd` del pack. Agachado **dentro de una mancha de hierba alta eres invisible** para las
-  criaturas; atacar te delata 3 s (`SPOTTED_TIME`). En táctil todavía no hay botón.
-- De paso quedó arreglada la invisibilidad del Ilusionista: `_enemy_target` manda a las criaturas
-  al **último sitio donde te vieron**, no a donde estás. Antes, si ibas solo, te seguían igual
-  aunque fueras invisible, porque al no haber aliado al que perseguir caían en tu posición real.
+  criaturas; atacar te delata 3 s (`SPOTTED_TIME`). En táctil, el botón **▼ Agacharse** junto al
+  joystick: un toque lo activa y otro lo quita (mantenerlo mientras mueves y atacas pedía tres
+  dedos); se suelta solo al caer. La pausa recuerda los controles de teclado.
+- **Las criaturas buscan** (petición del usuario, 2026-09-17; `game/creature_senses.gd`). Antes
+  sabían siempre dónde estabas (un campo de flujo hacia ti) y, si te escondías, se quedaban quietas
+  donde te vieron. Ahora cada una va por su cuenta, mirando cada 0,25 s:
+  - **Deambulan** buscando: la mitad de sus metas al azar a 10 celdas o menos, la otra mitad cerca
+    del centro del área limpia (donde el gas acaba empujando a todos); esperan un poco en cada meta.
+  - **Te ven a 12 m de día y a 8 m de noche**, si no hay muro ni roca en medio (el agua no tapa).
+  - **Agachado en hierba alta (o invisible) solo te descubren si pasan a 1,5 m o menos**, casi
+    encima. La que ya te persigue te sigue viendo a 4 m: agacharte 2 m más allá no basta.
+  - **La que te descubre grita** ("!" rojo y un sonido) y **avisa a todas las que estén a 30 m**:
+    saben a quién y dónde.
+  - **Si pasan 3 s sin verte**, van al último sitio donde te vieron, **rebuscan 8 s** alrededor y
+    vuelven a deambular. Atacar te delata 3 s, como siempre.
+  - Deambulando van despacio (55 %), rebuscando al 80 % y persiguiendo a tope. Esbirros y señuelos
+    siguen siendo presa a 14 m: los señuelos están para engañar.
+  - **Más difícil según avanza** (misma petición): las criaturas pegan ×1,3 respecto al 2D, cada
+    oleada sale con +10 % de vida (el `HP_PER_WAVE` del 2D) y el cierre del gas va en 4 tramos: en
+    cada uno, +15 % de vida para lo que salga, y +10 % de daño y +5 % de velocidad para todas ("¡La
+    horda se endurece!"). El gas cierra del todo hacia el minuto 4. Medido con bots en 10 min:
+    | | antes | ahora |
+    |---|---|---|
+    | Solo (7 leyendas) | todas caen en la oleada 5, la del jefe (271-354 s) | caen en las oleadas 3-5 (206-340 s) |
+    | Equipo de 4 (3 partidas) | oleada 9-10 sin perder | 2 caen en la oleada 5 (~300 s); 1 llega a la 10 |
+  - Medido con dos bots quietos en el centro: la primera detección llega a los ~25 s y la oleada 1
+    se limpia en ~85 s. `tests/senses_probe.gd` comprueba que cada detección cumple las reglas, que el
+    grito no pasa de 30 m y que las que deambulan se mueven.
 
 ## Premios de racha
 
@@ -405,7 +527,8 @@ de "La parca" porque solo juegas tú, así que el título se gana por bajas tota
 | clic izquierdo o Q | básica (mantener: carga el mandoble del Rompemareas) |
 | clic derecho o E | táctica (mantener para ver el radio, soltar para lanzar) |
 | R | definitiva (igual) |
-| Ctrl | agacharse |
+| Ctrl | agacharse (en el móvil, el botón ▼ junto al joystick: un toque lo activa y otro lo quita) |
+| F | Rey liche con esqueletos: alterna Atacar/Reagrupar; mantenida, apunta una Emboscada (en el móvil, botón de órdenes) |
 | **C** | cambiar cámara: sobre el hombro ↔ vista alta tipo ARPG |
 | Tab, 1-7 | cambiar de leyenda (solo en la Horda) |
 | P o ☰ | pausa: Seguir, Reiniciar, Menú |
@@ -432,7 +555,8 @@ Ver `assets/CREDITS.txt`. Resumen de lo que ata:
   repositorio tiene que ser privado**: hacerlo público sería redistribuir un pack de pago.
 - **Sonidos de conjuro** (p0ss, *Spell Sounds Starter Pack*): **CC-BY-SA 3.0**. Obliga a atribuir
   y a compartir igual. Es la misma licencia que el arte de Flare del juego 2D, así que no añade
-  una atadura nueva, pero hay que respetarla.
+  una atadura nueva, pero hay que respetarla. Los rayos (`shock.ogg`, `thunder.ogg`) son de Flare,
+  con la misma licencia, copiados del 2D.
 - El resto (partículas y música de Kenney, cynicmusic, Juhani Junkala) es CC0.
 
 ## Opciones útiles para probar
@@ -445,7 +569,7 @@ Ver `assets/CREDITS.txt`. Resumen de lo que ata:
 --noshadow      sin sombras
 --log           traza por consola (headless)
 --bench         FPS y tiempos por fotograma
---fxtest        mantiene rayos y una esfera en pantalla, para juzgar los efectos
+--fxtest        mantiene rayos, una esfera y la trampa o baliza de tu leyenda puestas, para juzgar los efectos
 --sporelog      traza el contagio y el daño creciente de la plaga del Clérigo
 --dashlog       mide si el Corte de hacha recorre lo que debe y a quién arrolla
 --meleelog      radio, apertura y a cuántos tocó cada golpe cuerpo a cuerpo, y cada tirón del ancla
@@ -456,11 +580,17 @@ Ver `assets/CREDITS.txt`. Resumen de lo que ata:
 --zonefast=N    multiplica la velocidad de cierre, para verlo sin esperar
 --mode=M        horda | 1v1 | 2v2 | 3v3 | 4v4 | menu (sin menú; menu sirve para capturarlo)
 --legend=N      tu leyenda (0-6; 7-9 son las retiradas, solo en la Horda)
---autoplay      por equipos, tu leyenda la lleva un bot (partidas enteras sin jugar)
+--autoplay      tu leyenda la lleva un bot (partidas enteras sin jugar), por equipos y en la Horda
+--team=N        Horda con N leyendas (1 = solo, hasta 4): tú y N-1 compañeros bot
+--down-one=S    (horde_probe) tumba a un compañero bot a los S s para probar las reanimaciones
+--down-player=S (horde_probe) te tumba a ti a los S s, para probar la derrota sin depender del balance
+--down-decoys   (decoy_probe) derriba a la Ilusionista en cuanto tenga un señuelo, para ver si la copian
+--expect-defeat (horde_probe) la partida tiene que acabar en derrota antes de --secs
 --rounds=N      rondas para ganar la partida (por defecto 2: al mejor de 3)
 --roundtime=S   tope de una ronda (por defecto 150 s)
 --autocast      en la Horda, lanza solo lo que esté listo hacia la criatura más cercana
---probe=nombre  engancha tests/nombre.gd (rocks_probe, match_probe) y sale con 0 o 1
+--probe=nombre  engancha tests/nombre.gd (rocks_probe, match_probe, decoy_probe, minimap_probe,
+                horde_probe, boss_probe, senses_probe, minion_probe) y sale con 0 o 1
 ```
 
 Partida de bots en headless, al mejor de 3, con traza cada 5 s:
@@ -526,7 +656,7 @@ muestras: para comprobar de verdad un sorteo por pesos hay que hacerlo aparte, c
     que al girar la cámara los segmentos se montan. La barra de munición gira el nodo entero hacia la
     cámara (`global_basis = cam.global_basis`) y sus trozos van sin billboard.
 19. **Medir el balance con bots engaña si los bots no ven lo que ve una persona**: pisaban todas las
-    trampas y balizas (36 % del daño). Rodearlas bajó al Químico del 80 % al 40 % de victorias.
+    trampas y balizas (36 % del daño). Rodearlas bajó al Trasgo Nox del 80 % al 40 % de victorias.
 
 **Trampa del `--shot` en headless**: sin ventana, `get_viewport().get_texture().get_image()`
 devuelve nulo, y llamar a `save_png` sobre nulo **aborta la función** en GDScript. El `quit()` que

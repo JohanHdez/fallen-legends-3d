@@ -42,6 +42,11 @@ const BEACON_TINT := Color(0.95, 1.35, 0.8)
 # 28 partidas: con 2 s el Tormentero bajaba del 81 % al 45 % pero Químico y Rompemareas subían al
 # 80 % y 72 %; con 3 s todas quedan entre el 30 % y el 56 %.
 const PVP_ARM_TIME := 3.0
+# Rayos con sonido (petición del usuario, 2026-09-17): cada descarga de la Trampa eléctrica suena, y la
+# Tormenta eléctrica tira un rayo del cielo sobre cada enemigo que siga dentro, con trueno. Sonidos de
+# Flare (CC-BY-SA 3.0), los mismos del 2D: powers/shock y powers/thunder.
+const STRIKE_SOUND := "shock"
+const THUNDER_SOUND := "thunder"
 
 # --- guardia automática del Caballero (player.GUARD_* del juego) ---
 const GUARD_DELAY := 0.4            # segundos quieto antes de cubrirse solo
@@ -54,6 +59,7 @@ const PULL_SPEED := 14.0            # m/s a los que el ancla arrastra: el tiempo
 const DECOY_TINT := Color(0.85, 0.8, 1.35)
 const SWAP_COOLDOWN := 1.0          # el intercambio se salta la recarga, pero no es gratis
 const SPOTTED_TIME := 3.0           # segundos que te delata atacar desde la maleza
+const DECOY_HP := 60.0              # vida de un señuelo (en el 2D, un golpe lo deshace)
 
 # --- carga del Mandoble del Rompemareas (player.CHARGE_*) ---
 const MELEE_ARC := 126.0            # abanico por defecto de un golpe cuerpo a cuerpo, en grados
@@ -71,7 +77,6 @@ const CROUCH_MULT := 0.45           # lo que frena ir agachado
 const RUN_MULT := 1.6
 const TURN_SPEED := 10.0
 const TORCH_RANGE := 14.0
-const RESPAWN_TIME := 4.0           # Level.DEFAULT_RESPAWN del juego
 # Regeneración: tras REGEN_DELAY s sin recibir daño, recupera REGEN_RATE de la vida máxima por
 # segundo. El ritmo es el de player.REGEN_RATE del 2D (8 %/s); la espera, 10 s a petición del
 # usuario (2026-09-16; el 2D usa 4 s).
@@ -96,6 +101,7 @@ var storms: Array = []              # zonas: tormentas, gas, estallidos y sus ca
 var spikes: Array = []              # muros de espinas creciendo
 var beacons: Array = []             # barriles de gas del Químico
 var allies: Array = []              # esbirros del Liche y señuelos del Ilusionista
+var minions: Minions                # órdenes e IA de los esqueletos del Rey liche
 var cd_cap := 0.0                   # --cd=N: recorta TODAS las recargas, solo para pruebas
 var casts := {}                     # tipo de habilidad -> veces lanzada (sondas y --log)
 var ult_casts := 0                  # definitivas lanzadas (sondas)
@@ -105,6 +111,7 @@ var soft_misses := 0                # ...y los que se apagaron sin tocar a nadie
 var traps_sprung := 0               # trampas eléctricas que alguien pisó después de puestas (sondas: ¿las esquivan?)
 var traps_on_top := 0               # ...y las que saltaron nada más poder (alguien ya estaba dentro)
 var beacons_popped := 0             # balizas Nox reventadas
+var storm_strikes := 0              # rayos de tormenta que cayeron sobre alguien (sondas)
 var _cast_slot := -1                # ranura que se está lanzando ahora mismo (do_cast)
 var _spore_tick := 0.0
 
@@ -113,6 +120,7 @@ func _init(p_main: Main, p_vfx: Vfx) -> void:
 	main = p_main
 	vfx = p_vfx
 	rng = p_main.rng
+	minions = Minions.new(self)
 
 
 # =====================================================================
@@ -275,7 +283,7 @@ func tick_fighter(f: Fighter, delta: float) -> void:
 	if f.ult_by_charge and f.alive() and (main.team_mode == null or main.team_mode.rules.state == "playing"):
 		f.ult_charge = minf(f.ult_charge + Fighter.ULT_PASSIVE * delta, 1.0)
 	f.since_damage += delta
-	if f.alive() and f.since_damage >= REGEN_DELAY and f.hp() < f.hp_max():
+	if f.regen and f.alive() and f.since_damage >= REGEN_DELAY and f.hp() < f.hp_max():
 		f.rec["hp"] = minf(f.hp() + REGEN_RATE * f.hp_max() * delta, f.hp_max())
 	# Red de seguridad: nada debería caerse del mundo, pero si pasa, se recupera en vez de
 	# quedarse cayendo eternamente (el suelo es un plano infinito y no frena desde abajo).
@@ -330,13 +338,15 @@ func move_fighter(f: Fighter, delta: float) -> void:
 		r["stun_t"] = float(r["stun_t"]) - delta
 		stunned = true
 	var locked := is_locked(f) or stunned
-	var wish := Vector3.ZERO if locked or not f.alive() else Vector3(f.wish.x, 0.0, f.wish.z)
+	var wish := Vector3.ZERO if locked or not (f.alive() or f.downed) else Vector3(f.wish.x, 0.0, f.wish.z)
 	var moving := wish.length() > 0.01
 	if moving:
 		wish = wish.normalized()
 	f.crouch = f.crouch and not locked and f.alive()
 	var spd := f.speed()
-	if f.crouch:
+	if f.downed:
+		spd *= Revive.CRAWL_SPEED        # derribada se arrastra
+	elif f.crouch:
 		spd *= CROUCH_MULT
 	elif f.run:
 		spd *= RUN_MULT
@@ -355,9 +365,15 @@ func move_fighter(f: Fighter, delta: float) -> void:
 		f.model.rotation.y = lerp_angle(f.model.rotation.y, target, TURN_SPEED * delta)
 
 	f.cast_anim_t = maxf(0.0, f.cast_anim_t - delta)
-	if f.anim != null and f.cast_anim_t <= 0.0 and f.alive():
+	if f.anim != null and f.downed:
+		var crawl := Revive.DOWNED_MOVE if moving else Revive.DOWNED_IDLE
+		if f.anim.has_animation(crawl) and f.anim.current_animation != crawl:
+			main._play_all(f.anims, crawl)
+	elif f.anim != null and f.cast_anim_t <= 0.0 and f.alive():
 		var want := ("Crouch_Fwd" if moving else "Crouch_Idle") if f.crouch \
 			else ("Jog_Fwd" if moving else "Idle")
+		if f.reviving and not moving:
+			want = Revive.HELPER_ANIM      # levantando a un compañero: arrodillado
 		if not f.anim.has_animation(want):
 			want = "Jog_Fwd" if moving else "Idle"
 		if f.anim.current_animation != want:
@@ -382,16 +398,16 @@ func foes_in(team: int, at: Vector3, radius: float, n := 999, visible_only := fa
 		if d <= radius:
 			found.append({"z": z, "d": d})
 	for f: Fighter in fighters:
-		if f.team == team or not f.alive():
-			continue
+		if f.team == team or f.dead():
+			continue                     # derribada sí: se la puede rematar
 		if visible_only and is_hidden(f):
 			continue
 		var d := at.distance_to(f.pos())
 		if d <= radius:
 			found.append({"z": f.rec, "d": d})
 	for al in allies:
-		if int(al.get("team", 1)) == team or float(al["hp"]) <= 0.0:
-			continue
+		if int(al.get("team", 1)) == team or float(al["hp"]) <= 0.0 or al.get("hidden", false):
+			continue                     # los esqueletos enterrados en una emboscada no se ven
 		var d: float = at.distance_to((al["node"] as Node3D).global_position)
 		if d <= radius:
 			found.append({"z": al, "d": d})
@@ -406,6 +422,8 @@ func foes_in(team: int, at: Vector3, radius: float, n := 999, visible_only := fa
 ## `slot` es la ranura que lo causó (-1 si no viene de una habilidad): lo que hace la definitiva no
 ## carga la definitiva.
 func hurt(z: Dictionary, dmg: float, stun := 0.0, by: Fighter = null, slot := -1) -> void:
+	if by != null:
+		dmg *= by.dmg_mult               # 1 salvo el jefe de la Horda
 	var dealt := 0.0
 	match String(z.get("kind", "zombie")):
 		"zombie":
@@ -417,21 +435,24 @@ func hurt(z: Dictionary, dmg: float, stun := 0.0, by: Fighter = null, slot := -1
 			if stun > 0.0:
 				z["stun_t"] = maxf(z.get("stun_t", 0.0), stun * (0.35 if z.get("boss", false) else 1.0))
 			if z["hp"] <= 0.0:
-				main._kill_zombie(z)
+				main._kill_zombie(z, by)
 		"fighter":
 			dealt = _hurt_fighter(fighter_by_id(int(z["fid"])), dmg, stun, by)
 		"decoy":
-			# Un solo golpe disipa un señuelo, como en el juego. Un campo que no hace daño no cuenta.
+			# Un solo golpe disipa un señuelo, como en el juego; los clones de la Fiesta (`tough`) aguantan
+			# su vida. Un campo que no hace daño no cuenta.
 			if dmg <= 0.0 and stun <= 0.0:
 				return
 			dealt = minf(dmg, float(z["hp"]))
-			z["hp"] = 0.0
-			# Quien lo rompe (o el dueño de la trampa, zona o esbirro que lo rompió) queda marcado
-			# para el equipo del señuelo. Caducar o intercambiarse con él no pasa por aquí.
-			if by != null and by.team != int(z.get("team", -1)):
-				by.mark(int(z.get("team", -1)))
-			var at: Vector3 = (z["node"] as Node3D).global_position + Vector3(0, 0.9, 0)
-			vfx.burst("magic_02", at, DECOY_TINT, 22, 0.6, 3.5, 0.7, 0.4)
+			z["hp"] = float(z["hp"]) - dmg if bool(z.get("tough", false)) else 0.0
+			if float(z["hp"]) <= 0.0:
+				z["hp"] = 0.0
+				# Quien lo rompe (o el dueño de la trampa, zona o esbirro que lo rompió) queda marcado
+				# para el equipo del señuelo. Caducar o intercambiarse con él no pasa por aquí.
+				if by != null and by.team != int(z.get("team", -1)):
+					by.mark(int(z.get("team", -1)))
+				var at: Vector3 = (z["node"] as Node3D).global_position + Vector3(0, 0.9, 0)
+				vfx.burst("magic_02", at, DECOY_TINT, 22, 0.6, 3.5, 0.7, 0.4)
 		_:
 			dealt = minf(dmg, maxf(float(z["hp"]), 0.0))
 			z["hp"] = float(z["hp"]) - dmg
@@ -447,10 +468,15 @@ func hurt(z: Dictionary, dmg: float, stun := 0.0, by: Fighter = null, slot := -1
 
 ## Devuelve la vida que de verdad le ha quitado.
 func _hurt_fighter(f: Fighter, amount: float, stun: float, by: Fighter) -> float:
-	if f == null or not f.alive() or f.invuln_t > 0.0:
+	if f == null or f.invuln_t > 0.0 or f.dead():
 		return 0.0
 	if main.team_mode != null and main.team_mode.rules.state != "playing":
 		return 0.0    # entre rondas o partida terminada: lo que quede en el suelo ya no hace daño
+	if f.downed:
+		# Rematar: a un derribado los golpes le quitan tiempo (petición del usuario).
+		f.bleed_t = Revive.bleed_after_hit(f.bleed_t, amount, f.hp_max())
+		f.rec["bar_t"] = Main.BAR_SHOW
+		return 0.0
 	var mult := (1.0 - f.buff_resist) if f.buff_left > 0.0 else 1.0
 	if f.guard:
 		mult *= GUARD_DAMAGE_MULT
@@ -463,28 +489,51 @@ func _hurt_fighter(f: Fighter, amount: float, stun: float, by: Fighter) -> float
 		f.rec["stun_t"] = maxf(float(f.rec.get("stun_t", 0.0)), stun)
 	if f.hp() <= 0.0:
 		f.rec["hp"] = 0.0
-		f.streak = 0
-		f.deaths += 1
-		f.respawn_t = RESPAWN_TIME
-		main._play_all(f.anims, "Death01")
-		if main.is_pvp():
-			# En PvP la leyenda caída suelta lo que tuviera a medias y sale del juego hasta
-			# reaparecer: si no, su preaviso seguía disparando desde el suelo.
-			f.windup = -1.0
-			f.windup_idx = -1
-			f.dash_left = 0.0
-			f.buff_left = 0.0
-			if f.buff_fx != null:
-				f.buff_fx.queue_free()
-				f.buff_fx = null
-			f.rec["dead_t"] = 0.0
-			if float(f.rec.get("spore_t", 0.0)) > 0.0:
-				spore_burst(f.rec)
-			var cs := f.body.get_child(0) as CollisionShape3D
-			if cs != null:
-				cs.set_deferred("disabled", true)
-		main.on_fighter_down(f, by)
+		_down(f, by)
 	return dealt
+
+
+## Derribada (petición del usuario, 2026-09-17): suelta lo que tuviera a medias —si no, su preaviso
+## seguía disparando desde el suelo—, se tumba y le quedan Revive.BLEED_TIME para que la levanten.
+## Quien la derribó se queda apuntado: suya será la baja si muere.
+func _down(f: Fighter, by: Fighter) -> void:
+	f.downed = true
+	f.bleed_t = Revive.BLEED_TIME
+	f.downed_by = by.id if by != null else -1
+	f.revive_progress = 0.0
+	f.streak = 0
+	if f.is_player:
+		main._touch_crouch = false     # al caer se suelta el botón de agacharse
+	f.crouch = false
+	f.windup = -1.0
+	f.windup_idx = -1
+	f.dash_left = 0.0
+	f.buff_left = 0.0
+	f.swing_charge_t = 0.0
+	if f.buff_fx != null:
+		f.buff_fx.queue_free()
+		f.buff_fx = null
+	if float(f.rec.get("spore_t", 0.0)) > 0.0:
+		spore_burst(f.rec)
+	main._play_all(f.anims, Revive.DOWNED_IDLE)
+	main.on_fighter_down(f, by)
+
+
+## Se acabó el derribo sin que la levantaran (o no queda nadie de su equipo en pie): muere, sale del
+## juego y la baja es de quien la derribó. Muerta ya no se levanta.
+func kill_downed(f: Fighter) -> void:
+	if not f.downed:
+		return
+	f.downed = false
+	f.bleed_t = 0.0
+	f.revive_progress = 0.0
+	f.deaths += 1
+	f.rec["dead_t"] = 0.0
+	var cs := f.body.get_child(0) as CollisionShape3D
+	if cs != null:
+		cs.set_deferred("disabled", true)
+	main._play_all(f.anims, "Death01")
+	main.on_fighter_death(f, fighter_by_id(f.downed_by))
 
 
 ## Empujón suave: el objetivo se desplaza y frena, en vez de teletransportarse.
@@ -515,6 +564,8 @@ func _tick_soft_bolt(b: Dictionary, owner: Fighter, delta: float) -> bool:
 	var hit: Dictionary = {}
 	var best := INF
 	for z in foes_in(int(b["team"]), from.lerp(to, 0.5), step * 0.5 + BOLT_HIT_RADIUS + 0.6, 6):
+		if String(z.get("kind", "")) == "fighter" and float(z.get("hp", 0.0)) <= 0.0 and z["node"] != tgt:
+			continue                     # un derribado está tumbado: la bala que va a otro le pasa por encima
 		var zp := (z["node"] as Node3D).global_position
 		var center := Vector3(zp.x, from.y, zp.z)
 		if _seg_dist(center, from, to) <= BOLT_HIT_RADIUS:
@@ -1078,14 +1129,15 @@ func cast_trap(f: Fighter, ab: Dictionary, at: Vector3, rad: float, beacon: bool
 	node.position = at
 	node.add_child(vfx.disc(rad, col, 0.10))
 	node.add_child(vfx.ring(rad, col, 0.35))
-	var core := vfx.disc(0.5, col, 0.8)
-	core.position = Vector3(0, 0.03, 0)
-	node.add_child(core)
+	# En el centro, una esfera: eléctrica y flotante la trampa, apoyada en el suelo la del Químico
+	# (petición del usuario, 2026-09-17). Antes era un disco pequeño que no se leía como trampa.
+	var orb := vfx.nox_orb(col) if beacon else vfx.electric_orb(col)
+	node.add_child(orb)
 	main.add_child(node)
 	var arming := main.is_pvp()
 	if arming:
 		(node.get_child(1) as Node3D).visible = false   # sin aro hasta que se active
-	traps.append({"node": node, "armed": true, "live": not arming, "left": float(ab.get("dur", 10.0)),
+	traps.append({"node": node, "orb": orb, "fx": 0.0, "armed": true, "live": not arming, "left": float(ab.get("dur", 10.0)),
 		"tick": 0.0, "rad": rad, "dmg": float(ab.get("dmg", 12.0)),
 		"stun": float(ab.get("stun", 0.0)), "every": float(ab.get("tick", 2.0)),
 		"tgt": int(ab.get("tgt", 99)), "beacon": beacon, "slow": float(ab.get("slow", 0.0)),
@@ -1113,30 +1165,18 @@ func _cap_owned(list: Array, f: Fighter, cap: int) -> void:
 func cast_beacon(f: Fighter, ab: Dictionary, at: Vector3, rad: float) -> void:
 	var body := StaticBody3D.new()
 	body.position = at + Vector3(0, 0.0, 0)
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.42
-	cyl.bottom_radius = 0.48
-	cyl.height = 1.25
-	var mi := MeshInstance3D.new()
-	mi.mesh = cyl
-	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(ab["col"]) * BEACON_TINT
-	m.emission_enabled = true
-	m.emission = Color(ab["col"]) * 0.35
-	m.roughness = 0.5
-	mi.material_override = m
-	mi.position = Vector3(0, 0.63, 0)
-	body.add_child(mi)
+	# Una esfera apoyada en el suelo que se enciende y echa humo al activarse (petición del usuario,
+	# 2026-09-17; antes era un poste).
+	var orb := vfx.nox_orb(Color(ab["col"]) * BEACON_TINT)
+	body.add_child(orb)
 	var cs := CollisionShape3D.new()
-	var shape := CylinderShape3D.new()
-	shape.radius = 0.45
-	shape.height = 1.3
+	var shape := SphereShape3D.new()
+	shape.radius = Vfx.NOX_R * 1.1
 	cs.shape = shape
-	cs.position = Vector3(0, 0.65, 0)
+	cs.position = Vector3(0, Vfx.NOX_R * 0.95, 0)
 	body.add_child(cs)
 	main.add_child(body)
-	vfx.emitter(body, "smoke_04", Color(ab["col"].r, ab["col"].g, ab["col"].b, 0.25), 0.3, 6, 1.4, 0.5, 0.5)
-	beacons.append({"node": body, "hp": BEACON_HP, "rad": rad, "dur": float(ab.get("dur", 10.0)),
+	beacons.append({"node": body, "orb": orb, "hp": BEACON_HP, "rad": rad, "dur": float(ab.get("dur", 10.0)),
 		"dmg": float(ab.get("dmg", 8.0)), "every": float(ab.get("tick", 0.5)),
 		"slow": float(ab.get("slow", 0.5)), "col": ab["col"], "spent": false,
 		"team": f.team, "owner": f.id, "slot": _cast_slot, "age": 0.0, "live": not main.is_pvp()})
@@ -1165,6 +1205,7 @@ func tick_beacons(delta: float) -> void:
 		if bc["spent"]:
 			continue
 		bc["age"] = float(bc["age"]) + delta
+		vfx.tick_orb(bc["orb"], float(bc["age"]), bool(bc["live"]))
 		var ready := can_trigger(float(bc["age"]), main.is_pvp())
 		if ready and not bc["live"]:
 			bc["live"] = true
@@ -1205,6 +1246,8 @@ func tick_traps(delta: float) -> void:
 		var t: Dictionary = traps[i]
 		var node: Node3D = t["node"]
 		var team := int(t["team"])
+		t["fx"] = float(t["fx"]) + delta
+		vfx.tick_orb(t["orb"], float(t["fx"]), bool(t["live"]))
 		if t["armed"]:
 			t["age"] = float(t["age"]) + delta
 			if not can_trigger(float(t["age"]), main.is_pvp()):
@@ -1226,12 +1269,16 @@ func tick_traps(delta: float) -> void:
 		if t["tick"] <= 0.0:
 			t["tick"] = float(t["every"])
 			var owner := fighter_by_id(int(t.get("owner", -1)))
+			var struck := false
 			for z in foes_in(team, node.position, float(t["rad"]), int(t["tgt"])):
 				hurt(z, float(t["dmg"]), float(t["stun"]), owner, int(t.get("slot", -1)))
 				if float(t["slow"]) > 0.0:
 					z["slow_t"] = 2.0
 				if not t["beacon"]:
 					vfx.spark(z["node"].global_position)
+					struck = true
+			if struck and owner != null:
+				_sound(owner, STRIKE_SOUND, -4.0)     # una descarga suena una vez, caigan los rayos que caigan
 		if t["left"] <= 0.0:
 			node.queue_free()
 			traps.remove_at(i)
@@ -1249,27 +1296,52 @@ func tick_storms(delta: float) -> void:
 			if st["delay"] <= 0.0:
 				st["hit"] = true
 				vfx.zone_burst(st, node.position, rad)
+				var storm := is_storm(st)
+				var hit_any := false
 				for z in foes_in(team, node.position, rad):
 					hurt(z, float(st["dmg"]), float(st["stun"]), owner, int(st.get("slot", -1)))
+					if storm:
+						_strike(z)
+						hit_any = true
 					if float(st["knock"]) > 0.0:
 						var away: Vector3 = (z["node"] as Node3D).global_position - node.position
 						away.y = 0.0
 						if away.length() < 0.05:
 							away = Vector3(1, 0, 0)
 						knock(z, away.normalized(), float(st["knock"]))
+				if hit_any and owner != null:
+					_sound(owner, THUNDER_SOUND, -3.0)
 			continue
 		st["field"] -= delta
 		st["tick"] -= delta
 		if st["tick"] <= 0.0 and float(st["fdmg"]) > 0.0:
 			st["tick"] = float(st["every"])
+			var struck := false
 			for z in foes_in(team, node.position, rad):
 				hurt(z, float(st["fdmg"]), float(st["fstun"]), owner, int(st.get("slot", -1)))
 				if float(st["slow"]) > 0.0:
 					z["slow_t"] = 2.0
 					z["blind_t"] = 2.5     # dentro del humo no ve: deambula
+				if is_storm(st):
+					_strike(z)
+					struck = true
+			if struck and owner != null:
+				_sound(owner, THUNDER_SOUND, -3.0)
 		if st["field"] <= 0.0:
 			node.queue_free()
 			storms.remove_at(i)
+
+
+## ¿Esta zona es una tormenta eléctrica (tira un rayo por víctima)? Las que aturden en su campo y
+## no llevan otro efecto; el gas Nox y la nube de la baliza no aturden.
+static func is_storm(st: Dictionary) -> bool:
+	return float(st.get("fstun", 0.0)) > 0.0 and String(st.get("fx", "spark")) == "spark"
+
+
+## Un rayo del cielo sobre una víctima de la tormenta.
+func _strike(z: Dictionary) -> void:
+	vfx.spark((z["node"] as Node3D).global_position)
+	storm_strikes += 1
 
 
 # -- muro de espinas -------------------------------------------------
@@ -1367,7 +1439,7 @@ func cast_decoy(f: Fighter, ab: Dictionary, at: Vector3) -> void:
 			pos = f.pos() + dir * 1.2
 		else:                              # SPREAD: corro alrededor, cada uno mirando a un lado
 			pos = f.pos() + Vector3(cos(a), 0, sin(a)) * rad
-		spawn_ally(f, "decoy", pos, float(ab.get("dur", 20.0)), mode, a, dir)
+		spawn_ally(f, "decoy", pos, float(ab.get("dur", 20.0)), mode, a, dir, bool(ab.get("tough", false)))
 	if float(ab.get("invis", 0.0)) > 0.0:
 		f.hidden_t = float(ab["invis"])
 
@@ -1401,7 +1473,7 @@ func swap_with_decoy(f: Fighter, al: Dictionary) -> void:
 
 ## Un aliado de `f`: el esbirro pelea, el señuelo solo distrae. Los enemigos los toman por
 ## objetivo cuando están más cerca que la leyenda.
-func spawn_ally(f: Fighter, kind: String, pos: Vector3, life: float, mode := 1, turn := 0.0, dir := Vector3.ZERO) -> void:
+func spawn_ally(f: Fighter, kind: String, pos: Vector3, life: float, mode := 1, turn := 0.0, dir := Vector3.ZERO, tough := false) -> void:
 	var made: Dictionary
 	if kind == "decoy":
 		made = main._make_character(f.data()["models"])
@@ -1443,7 +1515,19 @@ func spawn_ally(f: Fighter, kind: String, pos: Vector3, life: float, mode := 1, 
 	if kind == "decoy" and f.model != null:
 		model.rotation.y = (f.model.rotation.y + turn) if mode == 1 else atan2(dir.x, dir.z)
 	var abar := main._make_bar(body, 2.2, bar_color(f.team))
-	allies.append({"node": body, "anims": anims, "kind": kind, "bar": abar, "hpmax": 60.0, "hp": 60.0,
+	# El señuelo lleva el letrero de su leyenda (nombre, o "¡DERRIBADO! 32 s"): sin él se sabía cuál era
+	# la de verdad, que es la única con letrero.
+	var alabel: Label3D = null
+	if kind == "decoy" and f.label != null:
+		alabel = f.label.duplicate() as Label3D
+		alabel.position.y = abar.position.y + 0.32
+		body.add_child(alabel)
+	# Esqueleto y clones de la Fiesta (`tough`): vida ×3 por equipos como las leyendas (hp_mult de su
+	# dueño). Con 60, los clones duraban 5,5 s de sus 20 (petición del usuario, 2026-09-17). Hueco de
+	# formación por orden de salida.
+	var ahp := DECOY_HP * (f.hp_mult if kind == "minion" or tough else 1.0)
+	allies.append({"node": body, "anims": anims, "kind": kind, "bar": abar, "label": alabel, "hpmax": ahp, "hp": ahp, "tough": tough,
+		"slot_i": minions.of(f).size() if kind == "minion" else 0,
 		"life": life, "swing_t": 0.0, "mode": mode, "turn": turn, "dir": dir,
 		"spawn_t": 0.0, "model": model, "team": f.team, "owner": f.id, "dead_t": -1.0,
 		"stun_t": 0.0, "knock_t": 0.0, "slot": f.summon_slot if kind == "minion" else _cast_slot})
@@ -1472,28 +1556,8 @@ func tick_allies(delta: float) -> void:
 		if float(al.get("stun_t", 0.0)) > 0.0:
 			al["stun_t"] = float(al["stun_t"]) - delta
 			continue
-		al["swing_t"] = maxf(0.0, float(al["swing_t"]) - delta)
-		var near := foes_in(int(al["team"]), body.global_position, 18.0, 1, true)
-		if near.is_empty():
-			continue
-		var tgt: Node3D = near[0]["node"]
-		var d := tgt.global_position - body.global_position
-		d.y = 0.0
-		if d.length() <= 2.0:
-			if al["swing_t"] <= 0.0:
-				al["swing_t"] = 1.4
-				hurt(near[0], 18.0, 0.0, fighter_by_id(int(al["owner"])), int(al.get("slot", -1)))
-				main._play_all(al["anims"], "Sword_Attack")
-		else:
-			body.velocity.x = d.normalized().x * 3.0
-			body.velocity.z = d.normalized().z * 3.0
-			var m := body.get_child(1) as Node3D
-			if m != null:
-				m.rotation.y = lerp_angle(m.rotation.y, atan2(d.x, d.z), 8.0 * delta)
-		body.velocity.y -= Main.GRAVITY * delta
-		if body.is_on_floor() and body.velocity.y < 0.0:
-			body.velocity.y = -1.0
-		body.move_and_slide()
+		# Antes: al enemigo visible a menos de 18 m en línea recta, y quieto si no había nadie.
+		minions.tick(al, body, delta)
 
 
 ## El señuelo NO sigue a su leyenda: repite su desplazamiento girado a su propia orientación
@@ -1513,7 +1577,8 @@ func _tick_decoy(al: Dictionary, body: CharacterBody3D, delta: float) -> void:
 		model.rotation.y = owner.model.rotation.y + float(al["turn"])
 	var step := Vector3.ZERO
 	if int(al["mode"]) == 2:
-		step = (al["dir"] as Vector3) * owner.speed() * delta
+		# Derribada, el que sale de largo se arrastra a su paso: corriendo se sabría que es falso.
+		step = (al["dir"] as Vector3) * owner.speed() * (Revive.CRAWL_SPEED if owner.downed else 1.0) * delta
 	else:
 		step = owner.step.rotated(Vector3.UP, float(al["turn"]))
 	step.y = 0.0
@@ -1523,8 +1588,12 @@ func _tick_decoy(al: Dictionary, body: CharacterBody3D, delta: float) -> void:
 	if body.is_on_floor() and body.velocity.y < 0.0:
 		body.velocity.y = -1.0
 	body.move_and_slide()
-	# Gestos: el clon reproduce EXACTAMENTE lo que hace su leyenda, incluido lanzar.
-	# Es lo que de verdad confunde: si ella conjura, los cinco conjuran.
+	var alabel: Label3D = al.get("label")
+	if alabel != null and owner.label != null and alabel.text != owner.label.text:
+		alabel.text = owner.label.text
+		alabel.modulate = owner.label.modulate
+	# Gestos: el clon reproduce EXACTAMENTE lo que hace su leyenda, incluido lanzar y arrastrarse
+	# derribada. Es lo que de verdad confunde: si ella conjura, los cinco conjuran.
 	if owner.anim != null:
 		var cur := owner.anim.current_animation
 		var anims: Array = al["anims"]
@@ -1702,6 +1771,10 @@ func tick_bars(delta: float) -> void:
 	for al in allies:
 		if al.has("bar"):
 			main._set_bar(al["bar"], float(al["hp"]) / maxf(float(al.get("hpmax", 60.0)), 1.0))
+			if al["kind"] == "decoy" and al["bar"] != null:
+				# Sin barra si su leyenda no la lleva (derribada): si no, se sabría cuál es la de verdad.
+				var owner := fighter_by_id(int(al.get("owner", -1)))
+				(al["bar"] as Node3D).visible = owner == null or owner.alive()
 
 
 ## La vida de una criatura solo se ve cuando la golpeas, y se va sola (petición del usuario): con

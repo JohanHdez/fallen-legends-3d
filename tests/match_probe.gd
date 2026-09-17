@@ -19,6 +19,10 @@ var _first_hit := -1.0
 var _hp0 := {}
 var _rules_bad: Array = []   # incumplimientos de la munición o de la activación de trampas
 var _ammo_spent := false     # alguien bajó de su máximo
+var _down_t := {}            # id -> segundos seguidos derribada (en juego)
+var _stuck_down := ""        # alguien derribado mucho más de lo que permiten las reglas
+var _downs := 0              # derribos vistos
+var _down_ends := {"levantada": [], "muerta": []}   # cuánto duró cada derribo, según cómo acabó
 
 
 func _ready() -> void:
@@ -58,12 +62,30 @@ func _physics_process(delta: float) -> void:
 				_rules_bad.append("%s con %d/%d de munición" % [f.display_name, f.ammo, f.ammo_max])
 		elif f.ammo < f.ammo_max:
 			_ammo_spent = true
+		if f.downed and main.team_mode.rules.state == "playing":
+			if float(_down_t.get(f.id, 0.0)) == 0.0:
+				_downs += 1
+			_down_t[f.id] = float(_down_t.get(f.id, 0.0)) + delta
+			# 45 s, más lo que pare el reloj mientras la levantan a medias: el doble es imposible.
+			if float(_down_t[f.id]) > Revive.BLEED_TIME * 2.0:
+				_stuck_down = f.display_name
+		else:
+			if float(_down_t.get(f.id, 0.0)) > 0.0:
+				(_down_ends["levantada" if f.alive() else "muerta"] as Array).append(float(_down_t[f.id]))
+			_down_t[f.id] = 0.0
 	for t in main.combat.traps:
 		if not t["armed"] and float(t["age"]) < Combat.PVP_ARM_TIME - 0.02 and _rules_bad.size() < 4:
 			_rules_bad.append("una trampa saltó a los %.2f s, antes de activarse" % float(t["age"]))
 	var rules: TeamMatch = main.team_mode.rules
 	if rules.state == "over" or _t >= _secs:
 		_finish(rules)
+
+
+func _mean(a: Array) -> float:
+	var s := 0.0
+	for v in a:
+		s += float(v)
+	return s / maxf(a.size(), 1.0)
 
 
 func _finish(rules: TeamMatch) -> void:
@@ -86,6 +108,8 @@ func _finish(rules: TeamMatch) -> void:
 	if _first_hit < 0.0 or _first_hit > 45.0:
 		problems.append("tardan demasiado en encontrarse (primer golpe a %.0f s)" % _first_hit)
 	problems.append_array(_rules_bad)
+	if _stuck_down != "":
+		problems.append("%s estuvo derribada más de %.0f s: el derribo no se resuelve" % [_stuck_down, Revive.BLEED_TIME * 2.0])
 	if not _ammo_spent:
 		problems.append("nadie gastó munición: la básica no la usa")
 	var per := []
@@ -110,6 +134,10 @@ func _finish(rules: TeamMatch) -> void:
 	print("[SONDA] trampas eléctricas: %d puestas, %d saltan nada más activarse, %d pisadas después · balizas Nox: %d puestas, %d reventadas" % [
 		int(main.combat.casts.get("trap", 0)), main.combat.traps_on_top, main.combat.traps_sprung,
 		int(main.combat.casts.get("beacon", 0)), main.combat.beacons_popped])
+	print("[SONDA] rayos de tormenta: %d" % main.combat.storm_strikes)
+	var rv: ReviveSystem = main.team_mode.revive
+	print("[SONDA] derribos: %d · levantados por un compañero %d · muertos por no levantarlos a tiempo %d · duración media: levantada %.1f s, muerta %.1f s" % [
+		_downs, rv.revives, rv.bled_out, _mean(_down_ends["levantada"]), _mean(_down_ends["muerta"])])
 	var walked := []
 	for f in main.combat.fighters:
 		walked.append("%s %.0fm" % [f.display_name, _moved[f.id]])

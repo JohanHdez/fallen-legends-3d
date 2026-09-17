@@ -92,6 +92,8 @@ var spore_dps := 0.0                   # fuerza de SU plaga (Esporas del Clérig
 var summon_queue: Array = []
 var summon_t := 0.0
 var summon_slot := -1
+var minion_order := "attack"           # órdenes de sus esqueletos (Minions): attack, regroup, ambush
+var ambush_at := Vector3.ZERO          # dónde emboscan
 
 # -- partida ---------------------------------------------------------
 var hp_mult := 1.0                     # por equipos la vida va ×3 (TeamMode.PVP_HP_MULT)
@@ -102,11 +104,17 @@ var ammo := 0
 var ammo_t := 0.0                      # lo que falta para que vuelva el siguiente disparo
 var ammo_reload := 0.0
 var basic_dmg_mult := 1.0              # daño de la básica por equipos (LegendData.PVP_BASIC_DMG)
+var dmg_mult := 1.0                    # todo el daño que hace (el jefe de la Horda, ×1,5)
+var regen := true                      # se regenera tras REGEN_DELAY sin daño (el jefe de la Horda, no)
 var marked_t := 0.0                    # marcado por romper un señuelo: segundos que quedan
 var mark_team := -1                    # equipo que lo ve marcado (el del señuelo)
 var mark_shown := false                # ¿lleva puesto el contorno? (solo lo dibuja quien lo ve)
 var since_damage := 0.0               # segundos sin recibir daño: a partir de REGEN_DELAY se regenera
-var respawn_t := 0.0
+var downed := false                    # a 0 de vida: derribada, arrastrándose, hasta que la levanten o muera
+var bleed_t := 0.0                     # segundos que le quedan derribada (Revive.BLEED_TIME)
+var downed_by := -1                    # id de quien la derribó: suya es la baja si muere
+var revive_progress := 0.0             # 0..1 mientras un compañero agachado la levanta
+var reviving := false                  # está levantando a alguien este fotograma (se arrodilla)
 var invuln_t := 0.0
 var invuln_fx: Node3D = null
 var kills := 0
@@ -131,8 +139,14 @@ func hp_max() -> float:
 	return float(data()["hp"]) * hp_mult
 
 
+## En pie: con vida (una derribada no ataca ni cuenta para ganar la ronda).
 func alive() -> bool:
 	return hp() > 0.0
+
+
+## Muerta de verdad: ni en pie ni derribada.
+func dead() -> bool:
+	return hp() <= 0.0 and not downed
 
 
 func speed() -> float:

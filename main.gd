@@ -32,7 +32,10 @@ const GRAVE_STONE := Vector3(2.2, 5.2, 0.7)   # escala del guijarro que hace de 
 # sobre la horda porque el prototipo no tiene PvP y es el único sitio donde se puede ver.
 const ZONE_WAIT := 120.0       # 2 min de gracia antes de que el gas empiece a cerrar
 const ZONE_SHRINK := 0.24      # m/s que avanza: poco a poco, ~3,7 min hasta cerrarse del todo
-const ZONE_MIN := 10.0         # radio en el que se para
+const ZONE_MIN := 10.0         # radio en el que se para por equipos
+# En la Horda se para al 60 % del radio inicial (~38 m): petición del usuario, "no es necesario que la
+# zona avance tanto en el modo zombie". Sigue empujando hacia el centro pero deja sitio para moverse.
+const HORDE_ZONE_STOP := 0.6
 const ZONE_DPS := 7.0          # daño por segundo dentro del gas
 const ZONE_WALL_H := 16.0      # alto de la pared de humo
 # Negro VIOLÁCEO, no negro puro: de noche el negro puro es invisible y de día es un agujero.
@@ -55,14 +58,9 @@ const SPECIES := LegendData.SPECIES
 const SPAWN_EVERY := 0.5       # sale uno cada tanto, como el goteo del juego
 const WAVE_BREAK := 4.0
 const FLOW_EVERY := 0.4        # cada cuánto se recalcula el campo de flujo
-const PLAYER_HP := 210.0   # el Tormentero, de data/classes/tormentero.tres
 
 # Jefe: el Rompemareas (Tidebreaker) en vez del dragón, que en el juego sigue siendo 2D.
 const BOSS_WAVE := 5           # sale en esta oleada y en sus múltiplos
-const BOSS_HP_MULT := 12.0
-const BOSS_DMG_MULT := 2.5
-const BOSS_SPEED_MULT := 0.75
-const BOSS_REACH := 3.2
 
 # --- poderes del Tormentero, con los números reales de data/abilities/*.tres ---
 # El juego mide en píxeles: una celda son 192 px y aquí 3 m, así que 1 px = 1,5625 cm.
@@ -115,6 +113,18 @@ const KNOB_RADIUS := 42.0
 const DEAD_ZONE := 0.18
 const ABILITY_SIDE := 92.0
 const MAIN_SIDE := 120.0
+# Botón de agacharse (petición del usuario: en el móvil no había forma). Conmuta con un toque:
+# mantenerlo mientras mueves y atacas pediría tres dedos. Va arriba a la derecha del joystick, fuera
+# de la zona que lo agarra (JOY_RADIUS × JOY_GRAB).
+const CROUCH_BTN := 3
+const CROUCH_RADIUS := 36.0
+const CROUCH_OFFSET := Vector2(160.0, -135.0)
+# Botón de órdenes del Rey liche (sale con esqueletos vivos): tocar alterna Atacar/Reagrupar y
+# arrastrar coloca la Emboscada. En teclado, F; mantenida más de ORDERS_TAP, apunta la emboscada.
+const ORDERS_BTN := 4
+const ORDERS_RADIUS := 38.0
+const ORDERS_OFFSET := Vector2(-190.0, -130.0)   # desde la básica
+const ORDERS_TAP := 0.3
 const AIM_DEAD := 18.0       # px de arrastre a partir de los cuales se apunta a mano
 const AIM_RADIUS := 110.0    # px de arrastre que equivalen al alcance máximo
 # Datos de leyendas y habilidades: data/legend_data.gd. Alias para no tocar cada uso.
@@ -196,26 +206,22 @@ var _dbg := false
 var _props := 0
 var _placed := {}         # ruta de modelo -> transformadas de sus copias (MultiMesh); lo leen las sondas
 
-var zombies: Array = []        # {node, anim, hp, swing_t, dead_t}
-var _flow: Array = []          # campo de flujo: _flow[x][y] = celda siguiente hacia el jugador
-var _flow_t := 0.0
-var _wave := 0
-var _left_to_spawn := 0
-var _spawn_t := 0.0
-var _break_t := 0.0
+var horde: Horde = null        # oleadas, criaturas y jefe (solo en la Horda): game/horde.gd
+var horde_mode: HordeMode = null   # la Horda en equipo: compañeros, reanimaciones y derrota
+var _no_zombies: Array = []
+## Las criaturas vivas. Fuera de la Horda no hay ninguna (el combate y el gas las recorren igual).
+var zombies: Array:
+	get:
+		return horde.zombies if horde != null else _no_zombies
+
 var _kills := 0
 var _first_kill_done := false
 var _badge_img: TextureRect = null
 var _badge_cap: Label = null
 var _badge_tween: Tween = null
 var _badge_tex := {}
-var _spawn_cells: Array = []
-var _grave_cells: Array = []
 var _zombie_proto: Node3D = null      # el esqueleto de espada; también sirve de esbirro del liche
 var _species_proto := {}              # id de especie -> modelo del que se duplican los demás
-var _spawned := {}                    # cuántas han salido de cada especie (solo para --log)
-var _boss_proto: Node3D = null
-var _boss_alive := false
 var music: AudioStreamPlayer = null
 var _sfx_pool: Array = []
 var _sfx_next := 0
@@ -245,9 +251,11 @@ var _cycle := DAY_CYCLE
 var _aim_ring: MeshInstance3D = null
 var _aim_dot: MeshInstance3D = null
 var _preview := -1                 # qué habilidad se está apuntando (-1 ninguna)
+var _orders_hold := -1.0           # F mantenida para las órdenes del Rey liche: segundos (-1 = suelta)
 
 var touch := false
 var touch_ui: Control = null
+var minimap: Minimap = null
 var _joy_idx := -1
 var _joy_origin := Vector2.ZERO
 var _joy_vec := Vector2.ZERO
@@ -294,8 +302,8 @@ func _ready() -> void:
 	_build_graves(m)
 	_build_collision()
 	_spawn_player()
-	if _mode == "horda":
-		_spawn_companions()
+	if _mode == "horda" and _horde_team_size() == 1:
+		_spawn_companions()        # estatuas de ambiente; con compañeros de verdad sobran
 	_build_hud()
 	if not _args.has("nozone") and _mode != "menu":
 		if _args.has("zonewait"):
@@ -309,13 +317,23 @@ func _ready() -> void:
 		team_mode = TeamMode.new(self)
 		team_mode.setup(_mode)
 	else:
-		_setup_horde()
+		horde_mode = HordeMode.new(self)
+		horde_mode.setup(_horde_team_size())
+		horde = Horde.new(self)
+		horde.setup()
 	_build_aim()
 	if _mode != "menu" and team_mode == null:
 		reset_abilities()
 	_setup_music()
 	if _mode != "menu":
 		_setup_touch()
+		# Minimapa arriba a la derecha (petición del usuario), por debajo de la pausa.
+		var map_layer := CanvasLayer.new()
+		map_layer.layer = 14
+		add_child(map_layer)
+		minimap = Minimap.new()
+		map_layer.add_child(minimap)
+		minimap.setup(self)
 		# Pausa con Seguir / Reiniciar / Menú: por encima del táctil, para que el botón se pueda pulsar.
 		var pause_layer := CanvasLayer.new()
 		pause_layer.layer = 40
@@ -363,9 +381,9 @@ func _apply_cam_args() -> void:
 		_day_t = DAY_TIME + DUSK_TIME + 10.0      # empezar de noche, para probar
 	if _args.has("wait"):
 		_shot_wait = int(_args["wait"])
-	if _args.has("zombies"):
-		_left_to_spawn = int(_args["zombies"])
-		_spawn_t = 0.0
+	if _args.has("zombies") and horde != null:
+		horde.left_to_spawn = int(_args["zombies"])
+		horde.spawn_t = 0.0
 	if _args.has("at"):
 		var a := String(_args["at"])
 		var c := Vector2i(-1, -1)
@@ -381,21 +399,21 @@ func _apply_cam_args() -> void:
 			player.position = _cell_pos(c.x, c.y) + Vector3(0, 0.3, 0)
 	if _args.has("roster"):
 		_show_roster()
-	if _args.has("near"):
-		_spawn_cells = _cells_around(_cell_of(player.position), maxi(3, int(_args["near"]) if String(_args["near"]).is_valid_int() else 10))
-		print("aparición cercana: %d celdas" % _spawn_cells.size())
-	if _args.has("legend") and team_mode == null and _mode != "menu":
+	if _args.has("near") and horde != null:
+		horde.spawn_cells = _cells_around(_cell_of(player.position), maxi(3, int(_args["near"]) if String(_args["near"]).is_valid_int() else 10))
+		print("aparición cercana: %d celdas" % horde.spawn_cells.size())
+	if _args.has("legend") and team_mode == null and _mode != "menu" and _horde_team_size() == 1:
 		# Salta el recorte de PLAYABLE a propósito: es la única vía a las retiradas.
 		# (Por equipos la aplica TeamMode antes de repartir leyendas a los bots.)
 		set_legend(int(_args["legend"]))
-	if _args.has("boss"):
-		_spawn_boss()      # después de --near, para que salga al lado (solo pruebas)
+	if _args.has("boss") and horde != null:
+		horde.spawn_boss()      # después de --near, para que salga al lado (solo pruebas)
 	if _args.has("cd"):
 		combat.cd_cap = maxf(float(_args["cd"]), 0.1)
 		print("recargas recortadas a %.1f s (solo prueba)" % combat.cd_cap)
-	if _args.has("dianas"):
+	if _args.has("dianas") and horde != null:
 		var n := int(_args["dianas"]) if String(_args["dianas"]).is_valid_int() else 4
-		_spawn_targets(n)
+		horde.spawn_targets(n)
 
 
 ## Alinea las 7 leyendas delante de la cámara para verlas de una vez.
@@ -424,40 +442,6 @@ func _show_roster() -> void:
 		add_child(lbl)
 	if player_model != null:
 		player_model.visible = false
-
-
-## Solo para pruebas: criaturas QUIETAS en fila delante del jugador, a 6, 11, 16, 21... m. Sirve
-## para medir a ojo el alcance de una habilidad sin que se te echen encima mientras apuntas.
-func _spawn_targets(n: int) -> void:
-	# En la dirección en la que mira la CÁMARA, no el modelo: al arrancar no coinciden, y con la
-	# del modelo las dianas salían detrás del jugador, fuera de plano.
-	var f := Vector3(-sin(_yaw), 0, -cos(_yaw))
-	if player_model != null:
-		player_model.rotation.y = atan2(f.x, f.z)
-	var right := f.cross(Vector3.UP).normalized()
-	var puestas := 0
-	for i in n:
-		var d := 6.0 + i * 5.0
-		# Escalonadas a izquierda y derecha: en fila recta se tapan unas a otras y no se ve
-		# cuál está a qué distancia.
-		var at := player.global_position + f * d + right * (1.6 if i % 2 == 0 else -1.6)
-		var before := zombies.size()
-		_spawn_zombie(at)
-		if zombies.size() <= before:
-			continue
-		var z: Dictionary = zombies[zombies.size() - 1]
-		z["stun_t"] = 900.0                  # clavadas: son dianas, no enemigos
-		var lbl := Label3D.new()             # con la distancia encima, para no medir a ojo
-		lbl.text = "%d m" % int(round(d))
-		lbl.font_size = 72
-		lbl.pixel_size = 0.004
-		lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		lbl.no_depth_test = true
-		lbl.outline_size = 18
-		lbl.position = Vector3(0, 2.6, 0)
-		(z["node"] as Node3D).add_child(lbl)
-		puestas += 1
-	print("dianas: %d a 6, 11, 16... m, escalonadas y con su distancia escrita" % puestas)
 
 
 ## Celdas transitables a menos de `r` celdas de `c`, para medir con la multitud encima.
@@ -669,7 +653,7 @@ func _setup_zone() -> void:
 	_zone_c0.y = 0.0
 	_zone_r0 = minf(mw, mh) * CELL * 0.5
 	# El final cae en cualquier parte, pero entero dentro del mapa.
-	var margin := _zone_r0 - ZONE_MIN - 4.0
+	var margin := _zone_r0 - _zone_floor() - 4.0
 	var a := rng.randf() * TAU
 	_zone_c1 = _zone_c0 + Vector3(cos(a), 0, sin(a)) * rng.randf() * maxf(margin, 0.0)
 	_zone_c = _zone_c0
@@ -768,10 +752,11 @@ func _tick_zone(delta: float) -> void:
 	if _zone_wall == null:
 		return
 	_zone_t += delta
-	if _zone_t > _zone_wait and _zone_r > ZONE_MIN:
-		_zone_r = maxf(_zone_r - ZONE_SHRINK * _zone_fast * delta, ZONE_MIN)
+	var floor_r := _zone_floor()
+	if _zone_t > _zone_wait and _zone_r > floor_r:
+		_zone_r = maxf(_zone_r - ZONE_SHRINK * _zone_fast * delta, floor_r)
 		# El centro viaja al mismo ritmo que encoge el radio, para que llegue justo al final.
-		var p := clampf((_zone_r0 - _zone_r) / maxf(_zone_r0 - ZONE_MIN, 0.01), 0.0, 1.0)
+		var p := clampf((_zone_r0 - _zone_r) / maxf(_zone_r0 - floor_r, 0.01), 0.0, 1.0)
 		_zone_c = _zone_c0.lerp(_zone_c1, p)
 	_apply_zone()
 	var mat := _zone_wall.material_override as ShaderMaterial
@@ -958,7 +943,7 @@ func _scatter_grass(by_model: Dictionary) -> void:
 ## Las 6 tumbas que el juego coloca en el cementerio: losa plana y lápida de pie. La lápida medía
 ## 31 × 37 cm y no chocaba con nada, así que las criaturas que salían de la tumba y cualquiera que
 ## pasara la atravesaban. Ahora mide ~75 × 90 cm (GRAVE_STONE) y lleva su caja de colisión; las
-## criaturas brotan sobre la losa, delante de ella (_spawn_zombie).
+## criaturas brotan sobre la losa, delante de ella (Horde.spawn_zombie).
 func _build_graves(m: Dictionary) -> void:
 	var cells: Array = MapBuilder.cemetery_graves(_mb_grid, _mb_zones, MAP_SEED)
 	var slabs: Array = []
@@ -1312,11 +1297,37 @@ func is_pvp() -> bool:
 	return team_mode != null
 
 
-## Una leyenda ha caído. En la Horda solo cuenta para la racha (ya la pone a cero el combate);
-## por equipos, marcador, insignias y registro de bajas.
+## Una leyenda ha sido derribada (aún no es baja): 45 s para que la levanten.
 func on_fighter_down(f: Fighter, by: Fighter) -> void:
 	if team_mode != null:
 		team_mode.on_fighter_down(f, by)
+	elif horde_mode != null:
+		horde_mode.on_fighter_down(f, by)
+
+
+## Una leyenda derribada ha muerto: la baja es de quien la derribó (`by`).
+func on_fighter_death(f: Fighter, by: Fighter) -> void:
+	if team_mode != null:
+		team_mode.on_fighter_death(f, by)
+	elif horde_mode != null:
+		horde_mode.on_fighter_death(f, by)
+
+
+## Tamaño del equipo en la Horda: --team=N, o lo elegido en el menú; 1 = solo.
+func _horde_team_size() -> int:
+	if _args.has("team"):
+		return clampi(int(_args["team"]), 1, HordeMode.MAX_TEAM)
+	return clampi(int(Engine.get_meta("fl_horde_team", 1)), 1, HordeMode.MAX_TEAM)
+
+
+## ¿Tu leyenda la lleva un bot (--autoplay)?
+func _autoplay() -> bool:
+	return (team_mode != null and team_mode.autoplay) or (horde_mode != null and horde_mode.autoplay)
+
+
+## ¿Partida parada? Entre rondas o al acabar por equipos, o la Horda ya perdida.
+func _frozen() -> bool:
+	return (team_mode != null and team_mode.rules.state != "playing") or (horde_mode != null and horde_mode.over)
 
 
 ## Gas nuevo para otra ronda: vuelve al borde del mapa, espera otra vez y sortea hacia dónde cierra.
@@ -1326,10 +1337,20 @@ func reset_zone() -> void:
 	_zone_t = 0.0
 	_zone_c = _zone_c0
 	_zone_r = _zone_r0
-	var margin := _zone_r0 - ZONE_MIN - 4.0
+	var margin := _zone_r0 - _zone_floor() - 4.0
 	var a := rng.randf() * TAU
 	_zone_c1 = _zone_c0 + Vector3(cos(a), 0, sin(a)) * rng.randf() * maxf(margin, 0.0)
 	_apply_zone()
+
+
+## Radio en el que el gas deja de cerrarse: en la Horda, HORDE_ZONE_STOP del radio inicial; por
+## equipos, ZONE_MIN.
+static func zone_floor(r0: float, pvp: bool) -> float:
+	return ZONE_MIN if pvp else r0 * HORDE_ZONE_STOP
+
+
+func _zone_floor() -> float:
+	return zone_floor(_zone_r0, GameModes.is_pvp(_mode))
 
 
 ## ¿Está el gas demoníaco en juego?
@@ -1553,7 +1574,7 @@ func joy_center() -> Vector2:
 
 
 ## Misma distribución que touch_controls._layout(): básica grande abajo a la derecha,
-## táctica a su izquierda y definitiva arriba.
+## táctica a su izquierda y definitiva arriba. Más el botón de agacharse junto al joystick.
 func button_rects() -> Array:
 	var v := get_viewport().get_visible_rect().size
 	var main_c := Vector2(v.x - 100.0, v.y - 110.0)
@@ -1561,7 +1582,51 @@ func button_rects() -> Array:
 		{"idx": 0, "c": main_c, "r": MAIN_SIDE / 2.0, "name": String(_abil(0)["n"])},
 		{"idx": 1, "c": main_c + Vector2(-170.0, 20.0), "r": ABILITY_SIDE / 2.0, "name": String(_abil(1)["n"])},
 		{"idx": 2, "c": main_c + Vector2(-60.0, -165.0), "r": ABILITY_SIDE / 2.0, "name": String(_abil(2)["n"])},
-	]
+		{"idx": CROUCH_BTN, "c": crouch_center(joy_center()), "r": CROUCH_RADIUS, "name": "Agacharse"},
+	] + ([{"idx": ORDERS_BTN, "c": main_c + ORDERS_OFFSET, "r": ORDERS_RADIUS,
+		"name": Minions.ORDER_NAMES[pf.minion_order]}] if _has_minions() else [])
+
+
+static func crouch_center(joy: Vector2) -> Vector2:
+	return joy + CROUCH_OFFSET
+
+
+## ¿Tu leyenda tiene esqueletos a los que dar órdenes?
+func _has_minions() -> bool:
+	return pf != null and not combat.minions.of(pf).is_empty()
+
+
+## Soltar la F o el botón de órdenes: toque corto alterna Atacar/Reagrupar; si apuntaste, Emboscada.
+func _orders_release(ambush_at: Vector3) -> void:
+	if not _has_minions():
+		return
+	if ambush_at == Vector3.INF:
+		combat.minions.set_order(pf, Minions.toggle(pf.minion_order))
+	else:
+		combat.minions.set_order(pf, "ambush", ambush_at)
+
+
+## Dónde caería la emboscada que estás apuntando ahora (F mantenida o arrastrando el botón), o INF.
+func _ambush_aim() -> Vector3:
+	if not _has_minions():
+		return Vector3.INF
+	if _orders_hold >= ORDERS_TAP:
+		return Minions.ambush_point(pf.pos(), _aim_point(Minions.AMBUSH_RANGE))
+	if _aim_btn == ORDERS_BTN and _aim_drag.length() > AIM_DEAD:
+		return Minions.ambush_point(pf.pos(), _drag_point(Minions.AMBUSH_RANGE))
+	return Vector3.INF
+
+
+## Punto del suelo que marca un arrastre táctil de `_aim_drag`, a `rng_m` como mucho.
+func _drag_point(rng_m: float) -> Vector3:
+	var f := clampf(_aim_drag.length() / AIM_RADIUS, 0.0, 1.0)
+	var basis := cam.global_transform.basis
+	var fwd := Vector3(-basis.z.x, 0, -basis.z.z).normalized()
+	var right := Vector3(basis.x.x, 0, basis.x.z).normalized()
+	var dir := (right * _aim_drag.x - fwd * _aim_drag.y).normalized()
+	var at := player.global_position + dir * (rng_m * f)
+	at.y = 0.0
+	return at
 
 
 ## Segundos que faltan, para el número del centro del botón.
@@ -1582,17 +1647,19 @@ func _button_at(p: Vector2) -> int:
 func _input(e: InputEvent) -> void:
 	if not touch or touch_ui == null:
 		return
-	if team_mode != null and team_mode.rules.state != "playing":
+	if _frozen():
 		return
 	if e is InputEventScreenTouch:
 		var t := e as InputEventScreenTouch
 		if t.pressed:
 			var b := _button_at(t.position)
-			if b >= 0:
+			if b == CROUCH_BTN:
+				_touch_crouch = not _touch_crouch
+			elif b >= 0:
 				_aim_btn = b
 				_aim_idx = t.index          # el dedo que manda esta habilidad
 				_aim_drag = Vector2.ZERO
-				_preview = b
+				_preview = b if b != ORDERS_BTN else -1
 			elif t.position.distance_to(joy_center()) <= JOY_RADIUS * JOY_GRAB:
 				_joy_idx = t.index
 				_joy_origin = joy_center()
@@ -1639,18 +1706,13 @@ func _release_aim() -> void:
 	_preview = -1
 	if idx < 0:
 		return
+	if idx == ORDERS_BTN:
+		_orders_release(Vector3.INF if _aim_drag.length() <= AIM_DEAD else _drag_point(Minions.AMBUSH_RANGE))
+		return
 	if _aim_drag.length() <= AIM_DEAD:
 		_try_cast(idx)
 		return
-	var rng_m := _ability_range(idx)
-	var f := clampf(_aim_drag.length() / AIM_RADIUS, 0.0, 1.0)
-	var basis := cam.global_transform.basis
-	var fwd := Vector3(-basis.z.x, 0, -basis.z.z).normalized()
-	var right := Vector3(basis.x.x, 0, basis.x.z).normalized()
-	var dir := (right * _aim_drag.x - fwd * _aim_drag.y).normalized()
-	var at := player.global_position + dir * (rng_m * f)
-	at.y = 0.0
-	_try_cast(idx, at)
+	_try_cast(idx, _drag_point(_ability_range(idx)))
 
 
 # ---------------------------------------------------------------- poderes
@@ -1708,17 +1770,9 @@ func _auto_aim(i: int) -> Vector3:
 	return player.global_position + f * rng_m * 0.7
 
 
-## A quién persigue un enemigo: al aliado más cercano si lo tiene a tiro, si no al jugador.
-## Devuelve el propio aliado (o null si es el jugador) para poder morderlo.
-func _enemy_prey(from: Vector3) -> Dictionary:
-	var best_d := from.distance_to(player.global_position) if not player_hidden() else 1e9
-	var prey: Dictionary = {}
-	for al in combat.allies:
-		var d: float = from.distance_to((al["node"] as Node3D).global_position)
-		if d < best_d and d < 14.0:
-			best_d = d
-			prey = al
-	return prey
+## Una criatura ha muerto (lo llama Combat.hurt): la Horda lleva la cuenta.
+func _kill_zombie(z: Dictionary, by: Fighter = null) -> void:
+	horde.kill_zombie(z, by)
 
 
 ## Nadie puede apuntarte: por la invisibilidad del Ilusionista, o porque estás AGACHADO dentro de
@@ -1734,15 +1788,6 @@ func in_tall_grass(at: Vector3) -> bool:
 		return false
 	var c := _cell_of(at)
 	return _in_map(c) and tall_grass[c.x][c.y]
-
-
-func _enemy_target(from: Vector3) -> Vector3:
-	var prey := _enemy_prey(from)
-	if not prey.is_empty():
-		return (prey["node"] as Node3D).global_position
-	# Escondido: siguen yendo al último sitio donde te vieron, no a donde estás. Sin esto la
-	# invisibilidad no servía de nada cuando ibas solo: te seguían igual.
-	return pf.last_seen if player_hidden() else player.global_position
 
 
 # -- ciclo día/noche -------------------------------------------------
@@ -1893,182 +1938,12 @@ func _fade_bar(bar: Node3D, a: float) -> void:
 
 # ---------------------------------------------------------------- horda
 
-func _setup_horde() -> void:
-	_spawn_cells = MapBuilder.edge_cells(_mb_grid)
-	_grave_cells = MapBuilder.cemetery_graves(_mb_grid, _mb_zones, MAP_SEED)
-	_rebuild_flow(_cell_of(player.global_position))
-	_wave = int(_args.get("wave", "2" if touch else "1")) - 1
-	if touch and not _args.has("near"):
-		_spawn_cells = _cells_around(_cell_of(player.global_position), 9)
-	_start_wave()
-	print("horda lista: %d celdas de borde, %d tumbas" % [_spawn_cells.size(), _grave_cells.size()])
-
-
-func _start_wave() -> void:
-	_wave += 1
-	_left_to_spawn = 6 + _wave * 4
-	_break_t = 0.0
-	if _wave % BOSS_WAVE == 0:
-		_spawn_boss()
-		print("oleada %d: %d esqueletos + JEFE Rompemareas" % [_wave, _left_to_spawn])
-	else:
-		print("oleada %d: %d criaturas" % [_wave, _left_to_spawn])
-
-
-## El jefe de la oleada: un Rompemareas con vida y daño multiplicados.
-func _spawn_boss() -> void:
-	if _spawn_cells.is_empty():
-		return
-	if _boss_proto == null:
-		_boss_proto = _make_character([CHARS + "Tidebreaker.glb"],
-			[[UAL1, ZOMBIE_ANIMS_1], [UAL2, ZOMBIE_ANIMS_2]]).get("node")
-		if _boss_proto == null:
-			return
-	var c: Vector2i = _spawn_cells[rng.randi() % _spawn_cells.size()]
-	var model := _boss_proto.duplicate() as Node3D
-	var body := CharacterBody3D.new()
-	body.collision_layer = L_CREATURE
-	body.collision_mask = L_WORLD | L_CREATURE
-	body.position = _cell_pos(c.x, c.y) + Vector3(0, 0.3, 0)
-	var cs := CollisionShape3D.new()
-	var cap := CapsuleShape3D.new()
-	cap.radius = 0.9
-	cap.height = 2.4
-	cs.shape = cap
-	cs.position = Vector3(0, 1.2, 0)
-	body.add_child(cs)
-	body.add_child(model)
-	add_child(body)
-	var lbl := Label3D.new()
-	lbl.text = "ROMPEMAREAS"
-	lbl.font_size = 80
-	lbl.pixel_size = 0.0028
-	lbl.position = Vector3(0, 3.0, 0)
-	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	lbl.outline_size = 22
-	lbl.modulate = Color(1.0, 0.55, 0.35)
-	body.add_child(lbl)
-	var anims := _anims_of(model)
-	_play_all(anims, "Zombie_Walk_Fwd")
-	_add_eyes(model, Color(1.0, 0.25, 0.08))
-	var bbar := _make_bar(body, 3.4, BAR_ENEMY, 2.2)
-	zombies.append({"node": body, "kind": "zombie", "team": Fighter.TEAM_HORDE, "anims": anims, "bar": bbar,
-		"hpmax": ZOMBIE_HP * BOSS_HP_MULT, "hp": ZOMBIE_HP * BOSS_HP_MULT,
-		"swing_t": 0.0, "dead_t": -1.0, "stun_t": 0.0, "boss": true, "bscale": 2.2})
-	_boss_alive = true
-
-
 func _cell_of(p: Vector3) -> Vector2i:
 	return Vector2i(int(round(p.x / CELL + mw * 0.5)), int(round(p.z / CELL + mh * 0.5)))
 
 
 func _in_map(c: Vector2i) -> bool:
 	return c.x >= 0 and c.x < mw and c.y >= 0 and c.y < mh
-
-
-## Campo de flujo por BFS desde el jugador: cada celda guarda la siguiente hacia él. Es lo que
-## permite que 40 zombis recorran los pasillos sin una malla de navegación ni una ruta por bicho.
-func _rebuild_flow(goal: Vector2i) -> void:
-	_flow = []
-	for x in mw:
-		var col := []
-		col.resize(mh)
-		col.fill(Vector2i(-1, -1))
-		_flow.append(col)
-	if not _in_map(goal) or not MapBuilder.walkable(grid[goal.x][goal.y]):
-		return
-	var q: Array[Vector2i] = [goal]
-	_flow[goal.x][goal.y] = goal
-	var head := 0
-	var dirs := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
-		Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1)]
-	while head < q.size():
-		var c: Vector2i = q[head]
-		head += 1
-		for d in dirs:
-			var n: Vector2i = c + d
-			if not _in_map(n) or _flow[n.x][n.y].x != -1:
-				continue
-			if not MapBuilder.walkable(grid[n.x][n.y]):
-				continue
-			# en diagonal, no cortar esquinas por dentro de un muro
-			if d.x != 0 and d.y != 0:
-				if not MapBuilder.walkable(grid[c.x + d.x][c.y]) or not MapBuilder.walkable(grid[c.x][c.y + d.y]):
-					continue
-			_flow[n.x][n.y] = c
-			q.append(n)
-
-
-## Sale por los bordes del mapa o de una tumba, como en la Horda del juego.
-func _spawn_zombie(at := Vector3.INF) -> void:
-	var placed := at != Vector3.INF     # sitio fijo: lo usan las dianas de prueba
-	if zombies.size() >= MAX_ALIVE or (not placed and _spawn_cells.is_empty()):
-		return
-	var from_grave := not placed and not _grave_cells.is_empty() and rng.randf() < 0.3
-	var c := Vector2i.ZERO
-	if not placed:
-		c = _grave_cells[rng.randi() % _grave_cells.size()] if from_grave \
-			else _spawn_cells[rng.randi() % _spawn_cells.size()]
-	# De una tumba solo sale lo que tiene sentido que estuviera enterrado.
-	var sp := _pick_species(from_grave)
-	var proto := _proto_of(sp)
-	if proto == null:
-		return
-	var model := proto.duplicate() as Node3D
-	if model == null:
-		return
-	var body := CharacterBody3D.new()
-	body.collision_layer = L_CREATURE
-	body.collision_mask = L_WORLD | L_CREATURE
-	# De una tumba brota sobre la losa, delante de la lápida (que está a -0,9 y ahora choca): con el
-	# reparto de ±0,8 de siempre algunas nacían dentro de la piedra.
-	var jitter := Vector3(rng.randf_range(-0.6, 0.6), 0.2, rng.randf_range(0.1, 1.1)) if from_grave \
-		else Vector3(rng.randf_range(-0.8, 0.8), 0.2, rng.randf_range(-0.8, 0.8))
-	body.position = at + Vector3(0, 0.2, 0) if placed else _cell_pos(c.x, c.y) + jitter
-	var cs := CollisionShape3D.new()
-	var cap := CapsuleShape3D.new()
-	cap.radius = float(sp["rad"])
-	cap.height = float(sp["cap"])
-	cs.shape = cap
-	cs.position = Vector3(0, float(sp["cap"]) * 0.5, 0)
-	body.add_child(cs)
-	body.add_child(model)
-	add_child(body)
-	var anims := _anims_of(model)
-	_play_all(anims, "Zombie_Walk_Fwd", rng.randf() * 1.5)
-	if float(sp["eyes"]) > 0.0:
-		_add_eyes(model, sp["eye_col"], float(sp["eyes"]))
-	var bar := _make_bar(body, float(sp["bar"]), BAR_ENEMY, float(sp["bscale"]))
-	bar.visible = false        # solo se asoma al recibir un golpe (petición del usuario)
-	var hpmax := ZOMBIE_HP * float(sp["hp"])
-	zombies.append({"node": body, "kind": "zombie", "team": Fighter.TEAM_HORDE, "anims": anims, "bar": bar, "hpmax": hpmax, "hp": hpmax,
-		"swing_t": 0.0, "dead_t": -1.0, "stun_t": 0.0, "sp": sp["id"],
-		"spd": float(sp["spd"]), "dmg": float(sp["dmg"]), "reach": float(sp["reach"]),
-		"bscale": float(sp["bscale"]), "cap": float(sp["cap"])})
-	_spawned[sp["id"]] = int(_spawned.get(sp["id"], 0)) + 1
-
-
-## Sorteo por pesos, con dos filtros: de una tumba solo sale lo que tiene sentido que
-## estuviera enterrado (un licántropo saliendo de una lápida no se sostiene) y las élites
-## esperan a su oleada.
-func _pick_species(from_grave := false) -> Dictionary:
-	var pool: Array = []
-	var total := 0
-	for sp in SPECIES:
-		if from_grave and not bool(sp["grave"]):
-			continue
-		if _wave < int(sp["minw"]):
-			continue          # las élites no salen en las primeras oleadas
-		pool.append(sp)
-		total += int(sp["w"])
-	if pool.is_empty():
-		return SPECIES[0]
-	var r := rng.randi() % total
-	for sp in pool:
-		r -= int(sp["w"])
-		if r < 0:
-			return sp
-	return pool[0]
 
 
 ## Un modelo por especie, del que se duplican todos los demás: montar el esqueleto e injertar
@@ -2310,209 +2185,6 @@ func _add_eyes(model: Node3D, col := EYE_COL, sc := 1.0) -> void:
 	att.add_child(l)
 
 
-func _tick_horde(delta: float) -> void:
-	if music != null:
-		_play_music(_boss_alive)
-	_flow_t -= delta
-	if _flow_t <= 0.0:
-		_flow_t = FLOW_EVERY
-		_rebuild_flow(_cell_of(player.global_position))
-
-	# goteo de aparición y cambio de oleada
-	if _left_to_spawn > 0:
-		_spawn_t -= delta
-		if _spawn_t <= 0.0:
-			_spawn_t = SPAWN_EVERY
-			var t0 := Time.get_ticks_usec()
-			_spawn_zombie()
-			var ms := (Time.get_ticks_usec() - t0) / 1000.0
-			if _args.has("bench"):
-				print("   spawn: %.1f ms" % ms)
-			_left_to_spawn -= 1
-	elif zombies.is_empty():
-		_break_t += delta
-		if _break_t >= WAVE_BREAK:
-			_start_wave()
-
-	var ppos := player.global_position
-	var alive := _php > 0.0
-	for i in range(zombies.size() - 1, -1, -1):
-		var z: Dictionary = zombies[i]
-		var body: CharacterBody3D = z["node"]
-		if z["dead_t"] >= 0.0:
-			z["dead_t"] += delta
-			if z["dead_t"] > 2.5:
-				body.queue_free()
-				zombies.remove_at(i)
-			continue
-		_tick_zombie(z, body, ppos, alive, delta)
-
-
-func _tick_zombie(z: Dictionary, body: CharacterBody3D, ppos: Vector3, player_alive: bool, delta: float) -> void:
-	var pos := body.global_position
-	var to_player := _enemy_target(pos) - pos
-	to_player.y = 0.0
-	var dist := to_player.length()
-
-	z["swing_t"] = maxf(0.0, z["swing_t"] - delta)
-	# El empujón/tirón se resuelve ANTES que el aturdimiento. Si se mira después, cualquier
-	# habilidad que aturda y empuje a la vez deja al enemigo clavado — es exactamente el fallo
-	# que el juego 2D arregló en `enemy._tick_ai`. El aturdimiento sigue descontando igual.
-	if float(z.get("knock_t", 0.0)) > 0.0:
-		z["knock_t"] = float(z["knock_t"]) - delta
-		if z.get("stun_t", 0.0) > 0.0:
-			z["stun_t"] = float(z["stun_t"]) - delta
-		var k: Vector3 = z.get("knock", Vector3.ZERO)
-		body.velocity.x = k.x
-		body.velocity.z = k.z
-		body.velocity.y -= GRAVITY * delta
-		body.move_and_slide()
-		return
-	if z.get("stun_t", 0.0) > 0.0:
-		z["stun_t"] -= delta
-		body.velocity.x = 0.0
-		body.velocity.z = 0.0
-		body.velocity.y -= GRAVITY * delta
-		body.move_and_slide()
-		return
-	var anims: Array = z["anims"]
-	var ap: AnimationPlayer = anims[0] if anims.size() > 0 else null
-
-	var boss: bool = z.get("boss", false)
-	var reach: float = BOSS_REACH if boss else float(z.get("reach", ZOMBIE_REACH))
-	# Si tiene una baliza a mano la rompe: es lo que la activa por daño (enemy._beacon_in_reach).
-	var bc := combat.beacon_in_reach(Fighter.TEAM_HORDE, pos, reach + 0.6)
-	if not bc.is_empty():
-		body.velocity = Vector3(0, body.velocity.y, 0)
-		if z["swing_t"] <= 0.0:
-			z["swing_t"] = ZOMBIE_SWING
-			bc["hp"] = float(bc["hp"]) - ZOMBIE_DMG * 2.0
-			_play_all(anims, "Sword_Attack")
-			vfx.burst("spark_04", (bc["node"] as Node3D).global_position + Vector3(0, 0.7, 0),
-				bc["col"], 8, 0.3, 2.5, 0.3, -3.0)
-		body.velocity.y -= GRAVITY * delta
-		body.move_and_slide()
-		return
-	if float(z.get("blind_t", 0.0)) > 0.0:
-		# Cegado por el gas Nox: pierde el rumbo y deambula hasta que se le pasa.
-		z["blind_t"] = float(z["blind_t"]) - delta
-		if not z.has("blind_dir") or rng.randf() < 0.02:
-			var a := rng.randf() * TAU
-			z["blind_dir"] = Vector3(cos(a), 0, sin(a))
-		var wander: Vector3 = z["blind_dir"]
-		var bspd: float = ZOMBIE_SPEED * float(z.get("spd", 1.0)) * SLOW_MULT * 0.6
-		body.velocity.x = wander.x * bspd
-		body.velocity.z = wander.z * bspd
-		var mdl := body.get_child(1) as Node3D
-		if mdl != null:
-			mdl.rotation.y = lerp_angle(mdl.rotation.y, atan2(wander.x, wander.z), 3.0 * delta)
-		if ap != null and ap.current_animation != "Zombie_Walk_Fwd":
-			_play_all(anims, "Zombie_Walk_Fwd")
-		body.velocity.y -= GRAVITY * delta
-		if body.is_on_floor() and body.velocity.y < 0.0:
-			body.velocity.y = -1.0
-		body.move_and_slide()
-		return
-	var prey := _enemy_prey(pos)
-	# Si estás escondido, `dist` mide contra el último sitio donde te vieron, no contra ti: sin
-	# esta guarda te pegaban al llegar allí aunque estuvieras tumbado en la hierba a diez metros.
-	var can_hit: bool = (player_alive and not player_hidden()) or not prey.is_empty()
-	if can_hit and dist <= reach:
-		body.velocity = Vector3(0, body.velocity.y, 0)
-		if z["swing_t"] <= 0.0:
-			z["swing_t"] = ZOMBIE_SWING
-			var dmg := ZOMBIE_DMG * (BOSS_DMG_MULT if boss else float(z.get("dmg", 1.0)))
-			if prey.is_empty():
-				combat.hurt(pf.rec, dmg)
-			else:
-				combat.hurt(prey, dmg)
-			_play_all(anims, "Sword_Attack")
-		elif ap != null and ap.current_animation == "":
-			_play_all(anims, "Zombie_Idle")
-	else:
-		var dir := Vector3.ZERO
-		if player_alive:
-			var c := _cell_of(pos)
-			if dist < CELL * 1.6 or not _in_map(c) or _flow[c.x][c.y].x == -1:
-				dir = to_player
-			else:
-				var nxt: Vector2i = _flow[c.x][c.y]
-				dir = _cell_pos(nxt.x, nxt.y) - pos
-			dir.y = 0.0
-			dir = dir.normalized()
-		dir += _separation(body) * 0.6
-		dir.y = 0.0
-		if dir.length() > 0.01:
-			dir = dir.normalized()
-			var zspd: float = ZOMBIE_SPEED * (BOSS_SPEED_MULT if boss else float(z.get("spd", 1.0)))
-			if float(z.get("slow_t", 0.0)) > 0.0:
-				z["slow_t"] = float(z["slow_t"]) - delta
-				zspd *= SLOW_MULT
-			body.velocity.x = dir.x * zspd
-			body.velocity.z = dir.z * zspd
-			var model := body.get_child(1) as Node3D
-			if model != null:
-				model.rotation.y = lerp_angle(model.rotation.y, atan2(dir.x, dir.z), 8.0 * delta)
-		else:
-			body.velocity.x = 0.0
-			body.velocity.z = 0.0
-		if ap != null and ap.current_animation != "Sword_Attack" \
-				and ap.current_animation != "Zombie_Walk_Fwd":
-			_play_all(anims, "Zombie_Walk_Fwd")
-
-	body.velocity.y -= GRAVITY * delta
-	if body.is_on_floor() and body.velocity.y < 0.0:
-		body.velocity.y = -1.0
-	body.move_and_slide()
-
-
-## Empuje suave entre zombis para que rodeen en vez de apilarse (el juego hace lo mismo
-## en enemy._separation, pero allí con celdas espaciales).
-func _separation(body: CharacterBody3D) -> Vector3:
-	var push := Vector3.ZERO
-	var pos := body.global_position
-	for z in zombies:
-		var other: CharacterBody3D = z["node"]
-		if other == body or z["dead_t"] >= 0.0:
-			continue
-		var d := pos - other.global_position
-		d.y = 0.0
-		var l := d.length()
-		if l > 0.01 and l < 1.3:
-			push += d / l * (1.3 - l)
-	return push
-
-
-func _kill_zombie(z: Dictionary) -> void:
-	z["dead_t"] = 0.0
-	if float(z.get("spore_t", 0.0)) > 0.0:
-		combat.spore_burst(z)
-	_kills += 1
-	pf.streak += 1
-	_show_badge(_badge_for())
-	if z.get("boss", false):
-		_boss_alive = false
-		print("¡jefe abatido!")
-	var body: CharacterBody3D = z["node"]
-	body.velocity = Vector3.ZERO
-	var cs := body.get_child(0) as CollisionShape3D
-	if cs != null:
-		cs.disabled = true
-	_play_all(z["anims"], "Death01")
-
-
-func _tick_player_death(delta: float) -> void:
-	if _php > 0.0:
-		return
-	pf.respawn_t -= delta
-	if pf.respawn_t > 0.0:
-		return
-	var c := _spawn_cell()
-	player.position = _cell_pos(c.x, c.y) + Vector3(0, 0.3, 0)
-	_php = PLAYER_HP
-	_play_all(player_anims, "Idle")
-
-
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
@@ -2550,7 +2222,7 @@ func _apply_cam_mode() -> void:
 func _unhandled_input(e: InputEvent) -> void:
 	if _mode == "menu" or player == null:
 		return
-	if team_mode != null and team_mode.rules.state != "playing":
+	if _frozen():
 		return
 	if e is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var mm := e as InputEventMouseMotion
@@ -2586,11 +2258,14 @@ func _unhandled_input(e: InputEvent) -> void:
 					_preview = 1
 				KEY_R:
 					_preview = 2
+				KEY_F:
+					if _has_minions():
+						_orders_hold = 0.0
 				KEY_TAB:
-					if team_mode == null:      # por equipos la leyenda es la de la partida
+					if team_mode == null and _horde_team_size() == 1:   # con equipo, la de la partida
 						switch_legend(1)
 				KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7:
-					if team_mode == null:
+					if team_mode == null and _horde_team_size() == 1:
 						switch_legend(k.physical_keycode - KEY_1 - _legend)
 				KEY_F10:
 					get_tree().quit()
@@ -2604,6 +2279,11 @@ func _unhandled_input(e: InputEvent) -> void:
 					if _preview == 2:
 						_preview = -1
 						_try_cast(2)
+				KEY_F:
+					if _orders_hold >= 0.0:
+						var at := _ambush_aim() if _orders_hold >= ORDERS_TAP else Vector3.INF
+						_orders_hold = -1.0
+						_orders_release(at)
 
 
 ## Una vuelta de física: tu muerte y reaparición, el combate (leyendas y mundo), la horda, el gas
@@ -2617,13 +2297,13 @@ func _physics_process(delta: float) -> void:
 		pivot.rotation.y = _yaw
 		spring.rotation.x = _pitch
 		return
-	if team_mode == null:
-		_tick_player_death(delta)
 	_tick_powers(delta)
-	if team_mode == null:
-		_tick_horde(delta)
-	else:
+	if team_mode != null:
 		team_mode.tick(delta)
+	else:
+		if not horde_mode.over:
+			horde.tick(delta)
+		horde_mode.tick(delta)
 	_tick_zone(delta)
 	var basis := cam.global_transform.basis
 	var fwd := -basis.z
@@ -2634,8 +2314,8 @@ func _physics_process(delta: float) -> void:
 	right = right.normalized()
 
 	var wish := Vector3.ZERO
-	var frozen := team_mode != null and team_mode.rules.state != "playing"
-	if frozen or (team_mode != null and team_mode.autoplay):
+	var frozen := _frozen()
+	if frozen or _autoplay():
 		pass
 	elif touch:
 		wish = right * _joy_vec.x - fwd * _joy_vec.y
@@ -2648,17 +2328,19 @@ func _physics_process(delta: float) -> void:
 	# del mapa para las criaturas.
 	pf.crouch = Input.is_physical_key_pressed(KEY_CTRL) or _touch_crouch
 	pf.run = Input.is_physical_key_pressed(KEY_SHIFT)
-	if team_mode == null or not team_mode.autoplay:
+	if not _autoplay():
 		pf.wish = wish
 		combat.move_fighter(pf, delta)
 	if team_mode != null:
 		team_mode.move_bots(delta)
+	elif horde_mode != null:
+		horde_mode.move_bots(delta)
 
 	# La cámara baja con el jugador: agachado detrás de un peñasco tienes que ver lo mismo que él.
 	# Por rondas, si has caído sigue a un compañero en pie hasta que acabe la ronda.
 	var want_h := _cam_height * (0.62 if pf.crouch else 1.0)
 	var follow := pf
-	if team_mode != null and not pf.alive():
+	if (team_mode != null or horde_mode != null) and not pf.alive():
 		for o: Fighter in combat.fighters:
 			if o.team == pf.team and o.alive():
 				follow = o
@@ -2683,6 +2365,16 @@ func _tick_powers(delta: float) -> void:
 		aim = _aim_point_touch(_preview)
 	_aim_dot.position = aim + Vector3(0, 0.05, 0)
 	_aim_ring.visible = _preview >= 1
+	if _orders_hold >= 0.0:
+		_orders_hold += delta
+	var ambush := _ambush_aim()
+	if ambush != Vector3.INF:
+		# Apuntando la emboscada: el aro de 3 m donde se esconderán.
+		_aim_ring.visible = true
+		_aim_ring.position = ambush + Vector3(0, 0.05, 0)
+		var at_ring := _aim_ring.mesh as TorusMesh
+		at_ring.outer_radius = Minions.AMBUSH_RADIUS
+		at_ring.inner_radius = Minions.AMBUSH_RADIUS - 0.12
 	if _preview >= 1:
 		_aim_ring.position = aim + Vector3(0, 0.05, 0)
 		var r := _ability_radius(_preview)
@@ -2694,6 +2386,8 @@ func _tick_powers(delta: float) -> void:
 		_auto_cast()
 	if team_mode != null:
 		team_mode.tick_brains(delta)
+	elif horde_mode != null:
+		horde_mode.tick_brains(delta)
 
 	combat.tick_world(delta)
 
@@ -2771,6 +2465,13 @@ func _show_badge(badge: int) -> void:
 	_badge_tween.chain().tween_callback(_badge_img.hide)
 
 
+## Línea de órdenes de los esqueletos para el HUD de escritorio.
+func _orders_hud() -> String:
+	if not _has_minions():
+		return ""
+	return "\nEsqueletos: %s   ·   F alterna Atacar/Reagrupar   ·   F mantenida: Emboscada donde apuntas" % Minions.ORDER_NAMES[pf.minion_order]
+
+
 ## Texto de una ranura de habilidad: recarga o cargas, como la barra del HUD del juego.
 func _slot(i: int) -> String:
 	var ab := _abil(i)
@@ -2821,6 +2522,12 @@ func _process(_d: float) -> void:
 						pi = k
 						break
 				combat.cast_projectile(pf, pf.abil(pi), player.global_position + f * 16.0)
+			# Trampa o baliza de la leyenda: las esferas puestas (Trampa eléctrica, Baliza Nox) solo se
+			# ven si hay una en el suelo, y sin enemigos cerca nadie las lanza.
+			for k in 3:
+				var kind := String(_abil(k)["k"])
+				if (kind == "trap" or kind == "beacon") and combat.traps.is_empty() and combat.beacons.is_empty():
+					combat.do_cast(pf, k, player.global_position + f * 3.0)
 			if combat.decoy_alive(pf).is_empty() and String(_abil(1)["k"]) == "decoy":
 				combat.do_cast(pf, 1, player.global_position + f * 4.0)   # para ver el botón de intercambio
 			# Si la definitiva es una zona, se relanza en bucle: así el estallido (el polvo del
@@ -2856,9 +2563,9 @@ func _process(_d: float) -> void:
 				tally[k] = int(tally.get(k, 0)) + 1
 			print("[HORDA] pos=%v  limite=%.0f  oleada=%d vivos=%d porsalir=%d bajas=%d vida=%.0f mascercano=%.1fm fps=%d  %s" % [
 				player.global_position, mw * CELL * 0.5,
-				_wave, zombies.size(), _left_to_spawn, _kills, _php,
+				horde.wave if horde != null else 0, zombies.size(), horde.left_to_spawn if horde != null else 0, _kills, _php,
 				d_min if d_min < 1e8 else -1.0, Engine.get_frames_per_second(), str(tally)])
-			print("        salidas: %s" % str(_spawned))
+			print("        salidas: %s" % str(horde.spawned if horde != null else {}))
 	if _shot != "":
 		_shot_wait -= 1
 		if _shot_wait == 0:
@@ -2882,13 +2589,14 @@ func _process(_d: float) -> void:
 			+ "clic izq / Q básica · clic der o E táctica · R definitiva · WASD · Shift correr · Ctrl agacharse · C cámara · Esc ratón · F10 salir") % [
 			pf.display_name, st, ("  ·  OCULTO" if player_hidden() else ""),
 			Engine.get_frames_per_second(), _zone_hud(), _slot(0), _slot(1), _slot(2)]
+		hud.text += _orders_hud()
 		return
 	var cx := int(round(player.global_position.x / CELL + mw * 0.5))
 	var cy := int(round(player.global_position.z / CELL + mh * 0.5))
 	var zone := "campo"
 	if cx >= 0 and cx < mw and cy >= 0 and cy < mh:
 		zone = ["campo", "cueva", "cementerio"][zones[cx][cy]]
-	var estado := "MUERTO — vuelves en %.0f s" % maxf(pf.respawn_t, 0.0) if _php <= 0.0 else "vida %d/%d" % [int(_php), int(PLAYER_HP)]
+	var estado := "CAÍDO" if _php <= 0.0 else "vida %d/%d" % [int(_php), int(pf.hp_max())]
 	var oculto := ""
 	if pf.crouch:
 		oculto = "  ·  AGACHADO" + ("  ·  OCULTO" if player_hidden() else "")
@@ -2897,6 +2605,8 @@ func _process(_d: float) -> void:
 		+ "%s   %s   %s\n"
 		+ "clic izq / Q · clic der o E (mantener para ver el radio) · R definitiva\n"
 		+ "WASD mover · Shift correr · Ctrl agacharse · ratón girar · rueda zoom · C cámara · Esc ratón · F10 salir") % [
-		String(LEGENDS[_legend]["name"]), _wave, zombies.size(), _left_to_spawn, _kills, estado, oculto,
+		String(LEGENDS[_legend]["name"]), horde.wave if horde != null else 0, zombies.size(),
+		horde.left_to_spawn if horde != null else 0, _kills, estado, oculto,
 		Engine.get_frames_per_second(), _props, cx, cy, zone, _zone_hud(),
 		_slot(0), _slot(1), _slot(2)]
+	hud.text += _orders_hud()

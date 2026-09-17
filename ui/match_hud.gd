@@ -1,4 +1,5 @@
-## HUD de una partida por equipos: marcador y reloj arriba, últimas bajas a la derecha, cuenta
+## HUD de una partida por equipos: marcador y reloj arriba, últimas bajas a la derecha (debajo del
+## minimapa), cuenta
 ## atrás cuando caes y la pantalla final con el resumen y los botones de Revancha y Menú.
 ## Construido en código, con tamaños pensados para el dedo (botones de 64 px o más).
 class_name MatchHud
@@ -55,7 +56,7 @@ func setup(p_tm: TeamMode) -> void:
 	_feed.add_theme_font_size_override("normal_font_size", 18)
 	_feed.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
 	_feed.offset_left = -360
-	_feed.offset_top = 12
+	_feed.offset_top = Minimap.bottom() + 8.0     # debajo del minimapa
 	_feed.offset_right = -14
 	_feed.custom_minimum_size = Vector2(346, 0)
 	add_child(_feed)
@@ -147,10 +148,19 @@ func _process(_delta: float) -> void:
 				_hex(TeamMode.TEAM_COLORS.get(int(e["killer_team"]), Color.WHITE)), e["killer"], victim])
 	_feed.text = "\n".join(lines.slice(maxi(lines.size() - 4, 0)))
 	var pf := tm.main.pf
-	if m.state == "playing" and pf != null and not pf.alive():
-		_down.text = "Has caído · miras a tu equipo hasta que acabe la ronda"
-	else:
-		_down.text = ""
+	_down.text = ""
+	if m.state == "playing" and pf != null and tm.revive != null:
+		if pf.downed:
+			if pf.revive_progress > 0.0:
+				_down.text = "Te están levantando… %d %%" % int(pf.revive_progress * 100.0)
+			else:
+				_down.text = "Derribado · %d s: arrástrate hacia un compañero para que se agache a tu lado" % int(ceil(pf.bleed_t))
+		elif not pf.alive():
+			_down.text = "Has muerto · vuelves en la ronda siguiente"
+		else:
+			var lifting := tm.revive.helping(pf)
+			if lifting != null:
+				_down.text = "Levantando a %s… %d %%" % [lifting.display_name, int(lifting.revive_progress * 100.0)]
 	if pf != null and pf.alive() and pf.marked_t > 0.0 and pf.mark_team != pf.team:
 		_mark.text = "¡Te han marcado por romper un señuelo! Te ven a través de todo · %d s" % int(ceil(pf.marked_t))
 	else:

@@ -30,5 +30,10 @@ audio/spells/         p0ss - "Spell Sounds Starter Pack"   CC-BY-SA 3.0
                       CC-BY-SA OBLIGA a atribuir y a compartir igual. Es la misma licencia que
                       el arte de Flare que el juego ya usa, así que no añade una atadura nueva.
 
+audio/spells/shock.ogg, audio/spells/thunder.ogg
+                      Flare (flare-game), soundfx/powers   CC-BY-SA 3.0
+                      https://github.com/flareteam/flare-game
+                      Copiados tal cual del juego 2D: rayos de la Trampa y la Tormenta eléctricas.
+
 ui/kill_rewards/      Insignias de baja de Fallen Legends (el 2D), del mismo autor.
 ui/touch/             Iconos táctiles de Fallen Legends (el 2D), del mismo autor.

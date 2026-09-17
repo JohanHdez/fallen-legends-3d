@@ -28,6 +28,7 @@ var areas := {}
 var autoplay := false
 var hud: MatchHud
 var ammo_bar: AmmoBar = null         # tu munición (null si tu leyenda dispara sin límite)
+var revive: ReviveSystem             # levantar a los caídos y vuelta sola (Revive), por ronda
 var over_t := -1.0                   # segundos desde el final (-1 = en juego)
 
 
@@ -63,6 +64,7 @@ func setup(p_mode: String) -> void:
 	rules.setup(int(main._args.get("rounds", str(TeamMatch.ROUNDS_TO_WIN))),
 		float(main._args.get("roundtime", str(TeamMatch.ROUND_TIME))))
 	autoplay = main._args.has("autoplay")
+	revive = ReviveSystem.new(main, _respawn_point)
 	_apply_pvp_rules(pf)
 	if pf.ammo_max > 0:
 		ammo_bar = AmmoBar.new()
@@ -121,6 +123,12 @@ func _apply_pvp_rules(f: Fighter) -> void:
 	f.enable_pvp_damage()         # daño de la básica por equipos (LegendData.PVP_BASIC_DMG)
 
 
+## Dónde vuelve solo un caído: una celda de la zona de salida de su equipo, repartida por su id.
+func _respawn_point(f: Fighter) -> Vector3:
+	var c := _area_cell(f.team, f.id % maxi(size, 1))
+	return main._cell_pos(c.x, c.y) + Vector3(0, 0.2, 0)
+
+
 ## Tu básica sin munición: la barra parpadea y suena a hueco.
 func dry_fire() -> void:
 	if ammo_bar != null:
@@ -145,6 +153,12 @@ func _place(f: Fighter, c: Vector2i) -> void:
 
 ## Nombre encima de la barra, del color de su equipo. Se lee a través de la hierba.
 func _label(f: Fighter, text: String) -> Label3D:
+	return make_label(f, text)
+
+
+## Nombre sobre la barra de vida, del color de su equipo y visible a través de todo. Lo usa también
+## la Horda en equipo.
+static func make_label(f: Fighter, text: String) -> Label3D:
 	var lbl := Label3D.new()
 	lbl.text = text
 	lbl.font_size = 44
@@ -187,6 +201,8 @@ func tick(delta: float) -> void:
 		if _log_t <= 0.0:
 			_log_t = 5.0
 			_print_state()
+	if rules.state == "playing":
+		revive.tick(delta)
 	var counts := _alive()
 	rules.tick(delta, counts[0], counts[1])
 	var ev := rules.take_event()
@@ -259,6 +275,11 @@ func _reset_round() -> void:
 
 func _revive(f: Fighter, c: Vector2i) -> void:
 	_place(f, c)
+	f.downed = false              # derribados y muertos vuelven enteros en la ronda nueva
+	f.bleed_t = 0.0
+	f.downed_by = -1
+	f.revive_progress = 0.0
+	revive.restore_label(f)
 	f.rec["hp"] = f.hp_max()
 	f.rec["dead_t"] = -1.0
 	for k in ["stun_t", "knock_t", "slow_t", "blind_t"]:
@@ -286,8 +307,15 @@ func _revive(f: Fighter, c: Vector2i) -> void:
 		b.target = {}
 
 
-## Una leyenda ha caído: marcador, racha e insignias (las tuyas), y el registro de bajas.
+## Una leyenda ha sido derribada: aún no es baja (tiene 45 s para que la levanten).
 func on_fighter_down(f: Fighter, by: Fighter) -> void:
+	revive.on_down(f)
+	print("[DERRIBO] %s derriba a %s" % [by.display_name if by != null else "el gas", f.display_name])
+
+
+## Una leyenda ha muerto (nadie la levantó): la baja es de quien la derribó. Marcador, racha e
+## insignias (las tuyas), registro de bajas y, si su equipo se queda sin nadie en pie, fin de ronda.
+func on_fighter_death(f: Fighter, by: Fighter) -> void:
 	var ev := rules.on_kill(by.id if by != null else -1, f.id)
 	if ev.get("counted", false) and by != null:
 		by.kills += 1
@@ -296,7 +324,7 @@ func on_fighter_down(f: Fighter, by: Fighter) -> void:
 			main._kills = by.kills
 			main._show_badge(main._badge_for())
 	var counts := _alive()
-	print("[BAJA] %s cae%s · en pie %d-%d" % [f.display_name,
+	print("[BAJA] %s muere%s · en pie %d-%d" % [f.display_name,
 		(" a manos de " + by.display_name) if by != null else " (gas)",
 		int(counts[0][1]), int(counts[0][2])])
 	rules.check_elimination(counts[0])

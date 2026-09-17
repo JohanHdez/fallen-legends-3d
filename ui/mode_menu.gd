@@ -9,6 +9,9 @@ const GOLD := Color(1.0, 0.82, 0.38)
 
 var mode := "horda"
 var legend := 0
+var team := 1                         # Horda: tú solo (1) o con 1-3 compañeros bot
+var _team_row: HBoxContainer
+var _team_buttons := {}
 var _mode_buttons := {}
 var _desc: Label
 var _name: Label
@@ -24,6 +27,7 @@ func _ready() -> void:
 		legend = clampi(int(Engine.get_meta("fl_legend")), 0, LegendData.PLAYABLE - 1)
 	if Engine.has_meta("fl_last_mode"):
 		mode = String(Engine.get_meta("fl_last_mode"))
+	team = clampi(int(Engine.get_meta("fl_horde_team", 1)), 1, HordeMode.MAX_TEAM)
 	var veil := ColorRect.new()
 	veil.color = Color(0.02, 0.03, 0.06, 0.45)
 	veil.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -66,6 +70,24 @@ func _ready() -> void:
 		b.pressed.connect(_set_mode.bind(id))
 		modes.add_child(b)
 		_mode_buttons[id] = b
+	# Horda en equipo (petición del usuario, 2026-09-17): solo se ve con la Horda elegida.
+	_team_row = HBoxContainer.new()
+	_team_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_team_row.add_theme_constant_override("separation", 10)
+	col.add_child(_team_row)
+	var team_label := _label(22, Color(0.85, 0.86, 0.92))
+	team_label.text = "Equipo:"
+	_team_row.add_child(team_label)
+	var team_group := ButtonGroup.new()
+	for n in range(1, HordeMode.MAX_TEAM + 1):
+		var tb := _button("Solo" if n == 1 else "%d" % n, Vector2(96, 64), 24)
+		tb.toggle_mode = true
+		tb.button_group = team_group
+		tb.pressed.connect(_set_team.bind(n))
+		_team_row.add_child(tb)
+		_team_buttons[n] = tb
+	(_team_buttons[team] as Button).button_pressed = true
+
 	_desc = _label(19, Color(0.85, 0.86, 0.92))
 	_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -143,7 +165,12 @@ func _set_mode(id: String) -> void:
 		id = "horda"
 	mode = id
 	(_mode_buttons[id] as Button).button_pressed = true
+	_team_row.visible = id == "horda"
 	_desc.text = String(GameModes.MODES[id]["desc"])
+
+
+func _set_team(n: int) -> void:
+	team = n
 
 
 func _step_legend(d: int) -> void:
@@ -174,4 +201,5 @@ func _play() -> void:
 	Engine.set_meta("fl_mode", mode)
 	Engine.set_meta("fl_last_mode", mode)
 	Engine.set_meta("fl_legend", legend)
+	Engine.set_meta("fl_horde_team", team)
 	get_tree().reload_current_scene()

@@ -42,6 +42,13 @@ func setup(p_main: Main) -> void:
 		var b := _button(entry[0], Vector2(300, 68), 30)
 		b.pressed.connect(entry[1])
 		col.add_child(b)
+	# Controles de teclado: agacharse con Ctrl no se decía en ningún sitio (en móvil hay botón ▼).
+	var keys := Label.new()
+	keys.text = "Teclado: WASD mover · Shift correr · Ctrl agacharse\nQ o clic básica · E táctica · R definitiva · C cámara · P pausa"
+	keys.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	keys.add_theme_font_size_override("font_size", 16)
+	keys.add_theme_color_override("font_color", Color(0.8, 0.82, 0.9, 0.9))
+	col.add_child(keys)
 	_panel.visible = false
 
 

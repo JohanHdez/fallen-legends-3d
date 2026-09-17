@@ -20,7 +20,7 @@ func _match(to_win := 2, round_time := 120.0) -> TeamMatch:
 	m.add_fighter(0, "Tú", 1, 0, true)
 	m.add_fighter(1, "Clérigo", 1, 1)
 	m.add_fighter(2, "Liche", 2, 5)
-	m.add_fighter(3, "Químico", 2, 6)
+	m.add_fighter(3, "Trasgo Nox", 2, 6)
 	return m
 
 

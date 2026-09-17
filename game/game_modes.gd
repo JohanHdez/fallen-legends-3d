@@ -7,15 +7,15 @@ extends RefCounted
 const ORDER := ["horda", "1v1", "2v2", "3v3", "4v4"]
 const MODES := {
 	"horda": {"name": "Horda", "team_size": 0,
-		"desc": "Oleadas de criaturas que no acaban. Aguanta, escóndete en la hierba y sube la racha."},
+		"desc": "Oleadas que no paran, solo o con compañeros. Agáchate en la hierba, levanta a los caídos y aguanta: si cae todo el equipo, se acaba."},
 	"1v1": {"name": "Duelo 1 contra 1", "team_size": 1,
-		"desc": "Tu leyenda contra otra. Gana quien llegue antes a 15 bajas."},
+		"desc": "Tu leyenda contra otra, al mejor de 3 rondas: gana la ronda quien tumba al rival."},
 	"2v2": {"name": "2 contra 2", "team_size": 2,
-		"desc": "Tú y un compañero contra dos rivales. El gas va cerrando el mapa."},
+		"desc": "Tú y un compañero contra dos rivales, al mejor de 3. Levanta a tu compañero agachándote a su lado."},
 	"3v3": {"name": "3 contra 3", "team_size": 3,
-		"desc": "Tres por bando. Juntad habilidades: la trampa del Tormentero y el ancla se entienden."},
+		"desc": "Tres por bando, al mejor de 3. Juntad habilidades: la trampa del Tormentero y el ancla se entienden."},
 	"4v4": {"name": "4 contra 4", "team_size": 4,
-		"desc": "Batalla completa: cuatro leyendas por equipo, 15 bajas o 15 minutos."},
+		"desc": "Batalla completa: cuatro leyendas por equipo, al mejor de 3 rondas, con el gas cerrando el mapa."},
 }
 const AREA_RADIUS := 4.5        # celdas alrededor del punto de salida de cada equipo
 const AREA_REACH := 0.55        # a qué fracción del radio del gas queda cada punto de salida

@@ -94,6 +94,15 @@ PROBES=(
   "match_probe --mode=1v1 --autoplay --secs=600"
   "match_probe --mode=4v4 --autoplay --secs=600"
   "decoy_probe --mode=2v2 --legend=2 --autoplay --secs=400"
+  "decoy_probe --mode=2v2 --legend=2 --autoplay --down-decoys --secs=90"
+  "minimap_probe --mode=2v2 --autoplay --touch --secs=60"
+  "minimap_probe --team=2 --autoplay --near=8 --zombies=20 --secs=45"
+  "horde_probe --team=4 --autoplay --down-one=20 --secs=120"
+  "horde_probe --team=1 --autoplay --down-player=15 --expect-defeat --secs=40"
+  "boss_probe --team=4 --autoplay --near=4 --zombies=0 --boss --secs=120"
+  "senses_probe --team=2 --autoplay --near=8 --zombies=20 --secs=90"
+  "senses_probe --team=1 --near=6 --zombies=14 --nozone --hide --secs=60"
+  "minion_probe --legend=5 --nozone --zombies=0"
 )
 do_probes() {
   echo "== Sondas de partida (headless, --fixed-fps 60)"

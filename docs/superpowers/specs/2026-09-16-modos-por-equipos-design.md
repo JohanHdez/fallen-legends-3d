@@ -67,7 +67,7 @@ Se eligen 3 s: el reparto más igualado. Las peleas 1v1 entre bots pasan a durar
 | Regla | Valor | Origen |
 |---|---|---|
 | Partida | al mejor de 3: gana quien se lleva 2 rondas | usuario |
-| Ronda | la gana el equipo que deja al rival sin nadie en pie; sin reaparecer dentro de la ronda; eliminación mutua = nadie suma | usuario |
+| Ronda | la gana el equipo que deja al rival sin nadie en pie; desde el 2026-09-17 los caídos se levantan o vuelven solos (spec de la Horda en equipo); eliminación mutua = nadie suma | usuario |
 | Descanso entre rondas | 4 s; se limpia el mundo, todos a su zona de salida con vida y recargas llenas, gas nuevo | diseño |
 | Tope de ronda | 150 s; decide quien tenga más en pie y luego más vida | diseño |
 | Gas por rondas | arranca al 65 % del mapa, espera 25 s, cierra ×1,5 y quema ×3 (en la Horda: todo el mapa, 120 s, ×1) | usuario: mapa más corto |

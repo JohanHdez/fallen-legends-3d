@@ -28,7 +28,7 @@ func _ready() -> void:
 	main = get_parent()
 	_secs = float(main._args.get("secs", "60"))
 	if not main._args.has("zombies"):
-		main._left_to_spawn = 40
+		main.horde.left_to_spawn = 40
 	_collect_rocks()
 	var count := {}
 	for h in _hulls:

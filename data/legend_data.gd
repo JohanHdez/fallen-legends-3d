@@ -72,7 +72,8 @@ const ABILITIES := {
 		{"n": "Señuelo", "col": Color(0.75, 0.55, 1.0), "sfx": "decoy", "k": "decoy", "cd": 12.0, "cast": 0.25,
 		 "rng": 260.0, "rad": 70.0, "dur": 20.0, "n_decoys": 1, "move": 2, "swap": true, "act": 1},
 		{"n": "Fiesta de clones", "col": Color(0.9, 0.6, 1.0), "sfx": "decoy", "k": "decoy", "cd": 35.0, "cast": 0.4,
-		 "rng": 0.0, "rad": 110.0, "dur": 20.0, "n_decoys": 5, "move": 1, "invis": 4.0},
+		 "rng": 0.0, "rad": 110.0, "dur": 20.0, "n_decoys": 5, "move": 1, "invis": 4.0,
+		 "tough": true},   # desviación: vida ×3 por equipos (en el 2D un golpe los deshace)
 	],
 	"caballero": [
 		{"n": "Lanzada", "col": Color(0.85, 0.85, 0.9), "sfx": "melee", "k": "melee", "cd": 0.8, "cast": 0.2, "dmg": 30.0, "rad": 115.0},
@@ -171,7 +172,10 @@ const LEGENDS := [
 	 "models": [CHARS + "Tidebreaker.glb"]},
 	{"id": "liche", "name": "Rey liche", "hp": 220.0, "speed": 215.0, "tint": Color(0.60, 0.85, 0.75),
 	 "models": [CHARS + "Skeleton_B.glb"]},
-	{"id": "quimico", "name": "Químico", "hp": 230.0, "speed": 225.0, "tint": Color.WHITE,
+	# Desviación del 2D (petición del usuario, 2026-09-17): allí se llama "Químico"; aquí lleva el
+	# modelo de un diablillo con mazo y el usuario pidió un nombre acorde. El `id` NO cambia: es el
+	# que casa con los datos del 2D.
+	{"id": "quimico", "name": "Trasgo Nox", "hp": 230.0, "speed": 225.0, "tint": Color.WHITE,
 	 "models": [CHARS + "Imp.glb"]},
 	# --- de aquí abajo, FUERA DE LA ROTACIÓN (ver PLAYABLE) ---
 	# Las tres RETIRADAS del juego (Net.RETIRED_CLASSES): siguen con datos y habilidades, pero no
@@ -201,7 +205,9 @@ const PLAYABLE := 7
 # Solo se injertan las animaciones que se usan: copiarlas las 43 por personaje cuesta caro
 # cuando hay 40 zombis en pantalla.
 # Roll = la voltereta de Retirada del Arquero. Las de UAL2 van en su propia pasada.
-const HERO_ANIMS := "Idle,Jog_Fwd,Sword_Attack,Spell_Simple_Shoot,Death01,Roll,Crouch_Idle,Crouch_Fwd"
+# Swim_Fwd / Swim_Idle hacen de arrastrarse derribado (no hay animación de gatear) y Fixing_Kneeling es
+# el gesto de quien levanta a un compañero (Revive.DOWNED_* y HELPER_ANIM).
+const HERO_ANIMS := "Idle,Jog_Fwd,Sword_Attack,Spell_Simple_Shoot,Death01,Roll,Crouch_Idle,Crouch_Fwd,Swim_Fwd,Swim_Idle,Fixing_Kneeling"
 # Sword_Regular_A (0,43 s) y _B (0,53 s) miden casi lo que dura un preaviso, así que salen a
 # velocidad casi natural. Sword_Heavy_Combo dura 4,33 s: estirado al preaviso salía a 12x, un
 # temblor en vez de un mazazo.

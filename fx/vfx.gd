@@ -1,12 +1,19 @@
 ## Efectos visuales de Fallen Legends 3D: partículas del Kenney Particle Pack, fogonazos, rayos,
-## aros y discos de zona, nubes de gas, polvo de golpe, matas de espinas, burbuja de guardia y la
-## cadena del ancla. Movido desde main.gd (2026-09-16) para que el combate de cualquier leyenda,
+## aros y discos de zona, esferas de las trampas puestas, nubes de gas, polvo de golpe, matas de
+## espinas, burbuja de guardia y la cadena del ancla. Movido desde main.gd (2026-09-16) para que el combate de cualquier leyenda,
 ## sea tuya o de un bot, dibuje lo mismo. Solo dibuja: no decide daño ni estado.
 ## Lo que es temporal se apunta en `sparks` con su vida y `tick` lo libera.
 class_name Vfx
 extends RefCounted
 
 const SPARK := Color(0.62, 0.80, 1.0)
+# --- esferas de las trampas puestas (petición del usuario, 2026-09-17) ---
+const ORB_R := 0.30                   # radio del núcleo de la esfera eléctrica
+const ORB_H := 0.95                   # a qué altura flota
+const ORB_ARMS := 4                   # brazos de plasma que le saltan alrededor
+const ORB_SEGS := 3                   # tramos de cada brazo
+const ORB_STEP := 0.09                # cada cuánto se rehacen los brazos (s)
+const NOX_R := 0.42                   # radio de la esfera de la Baliza Nox, apoyada en el suelo
 
 var world: Node3D                     # donde cuelgan los efectos (la raíz de la escena)
 var rng: RandomNumberGenerator        # el de la partida: el reparto de rayos y púas sale de él
@@ -157,6 +164,133 @@ func spark(at: Vector3, col := Color(0.85, 0.92, 1.0)) -> void:
 		root.add_child(mi)
 	sparks.append({"node": root, "life": 0.18})
 	flash(at + Vector3(0, 0.3, 0), col, 1.6, 0.22)
+
+
+## Esfera ELÉCTRICA flotante de la Trampa eléctrica (petición del usuario, 2026-09-17; antes era un
+## disco pequeño en el suelo que no se leía como trampa): un núcleo que late y flota, con brazos
+## quebrados saltando alrededor como una bola de plasma. Los brazos se rehacen con senos del reloj y
+## NO con `rng`: dibujar no puede cambiar las trazas deterministas de la Horda.
+func electric_orb(color: Color) -> Node3D:
+	var root := Node3D.new()
+	root.position = Vector3(0, ORB_H, 0)
+	var core := MeshInstance3D.new()
+	core.name = "Core"
+	var sph := SphereMesh.new()
+	sph.radius = ORB_R
+	sph.height = ORB_R * 2.0
+	sph.radial_segments = 12
+	sph.rings = 7
+	core.mesh = sph
+	# Bola sólida clara con un halo que suma luz: en un claro soleado, una esfera solo aditiva se
+	# lavaba con el fondo y no se veía.
+	var solid := StandardMaterial3D.new()
+	solid.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	solid.albedo_color = Color(minf(color.r + 0.35, 1.0), minf(color.g + 0.3, 1.0), 1.0)
+	core.material_override = solid
+	root.add_child(core)
+	var halo := MeshInstance3D.new()
+	halo.name = "Halo"
+	var hs := SphereMesh.new()
+	hs.radius = ORB_R * 1.7
+	hs.height = ORB_R * 3.4
+	hs.radial_segments = 10
+	hs.rings = 6
+	halo.mesh = hs
+	halo.material_override = _glow(color, 0.30)
+	root.add_child(halo)
+	# Los brazos son cilindros finos (como los rayos): una línea de un píxel se perdía a dos metros.
+	var arms := Node3D.new()
+	arms.name = "Arms"
+	var bolt := CylinderMesh.new()
+	bolt.top_radius = 0.035
+	bolt.bottom_radius = 0.035
+	bolt.height = 1.0
+	bolt.radial_segments = 4
+	var mat := _glow(Color(minf(color.r + 0.3, 1.0), minf(color.g + 0.3, 1.0), 1.0), 1.0)
+	for i in ORB_ARMS * ORB_SEGS:
+		var mi := MeshInstance3D.new()
+		mi.mesh = bolt
+		mi.material_override = mat
+		arms.add_child(mi)
+	root.add_child(arms)
+	return root
+
+
+## Esfera de la Baliza Nox apoyada en el suelo (petición del usuario, 2026-09-17; antes era un poste):
+## una bola turbia que, al activarse, se enciende y empieza a echar humo.
+func nox_orb(color: Color) -> Node3D:
+	var root := Node3D.new()
+	var core := MeshInstance3D.new()
+	core.name = "Core"
+	var sph := SphereMesh.new()
+	sph.radius = NOX_R
+	sph.height = NOX_R * 2.0
+	sph.radial_segments = 16
+	sph.rings = 9
+	core.mesh = sph
+	core.position = Vector3(0, NOX_R * 0.95, 0)
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(color.r * 0.9, color.g * 1.15, color.b * 0.8)
+	m.emission_enabled = true
+	m.emission = color * 0.35
+	m.roughness = 0.45
+	core.material_override = m
+	root.add_child(core)
+	var smoke := emitter(root, "smoke_04", Color(color.r * 0.75, color.g, color.b * 0.45, 0.5), NOX_R * 0.8,
+		14, 1.8, 0.6, 0.5)
+	smoke.name = "Smoke"
+	smoke.position = Vector3(0, NOX_R, 0)
+	smoke.emitting = false                 # humo solo cuando se activa
+	return root
+
+
+## Anima una esfera puesta: late, flota, rehace los brazos y, si ya está activa, echa humo. `t` son
+## los segundos que lleva puesta; `live` es si ya está armada (por equipos tarda PVP_ARM_TIME).
+func tick_orb(root: Node3D, t: float, live: bool) -> void:
+	if root == null or not is_instance_valid(root):
+		return
+	var core := root.get_node_or_null("Core") as MeshInstance3D
+	if core != null:
+		core.scale = Vector3.ONE * ((1.0 + 0.08 * sin(t * 7.0)) if live else 0.78)
+	var arms := root.get_node_or_null("Arms") as Node3D
+	if arms != null:
+		root.position.y = ORB_H + 0.07 * sin(t * 2.6)
+		var step := int(t / ORB_STEP)
+		if step != int(root.get_meta("fx_step", -1)):
+			root.set_meta("fx_step", step)
+			_plasma(arms, float(step), live)
+	var smoke := root.get_node_or_null("Smoke") as CPUParticles3D
+	if smoke != null and smoke.emitting != live:
+		smoke.emitting = live
+
+
+## Recoloca los brazos de plasma en el paso `k`: ORB_ARMS quebradas cortas que salen del núcleo. No
+## crea nada: mueve los cilindros que ya tiene (ORB_ARMS × ORB_SEGS).
+func _plasma(arms: Node3D, k: float, live: bool) -> void:
+	arms.visible = live
+	if not live:
+		return
+	var n := 0
+	for i in ORB_ARMS:
+		var a := TAU * i / ORB_ARMS + k * 0.7
+		var dir := Vector3(cos(a), sin(k * 1.3 + i * 2.1) * 0.6, sin(a)).normalized()
+		var prev := dir * ORB_R
+		for s in range(1, ORB_SEGS + 1):
+			var p := dir * (ORB_R + s * 0.17) + Vector3(
+				sin(k * 3.1 + s * 2.3 + i), cos(k * 2.7 + s * 1.7 + i), sin(k * 4.3 + s * 1.1 - i)) * 0.10
+			span(arms.get_child(n) as MeshInstance3D, prev, p)
+			prev = p
+			n += 1
+
+
+## Material que brilla por sí solo y suma luz: el de rayos, núcleos y brazos.
+func _glow(color: Color, alpha: float) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	m.albedo_color = Color(color.r, color.g, color.b, alpha)
+	return m
 
 
 func ring(radius: float, color: Color, alpha := 0.9) -> MeshInstance3D:

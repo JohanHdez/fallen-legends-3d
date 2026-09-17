@@ -99,6 +99,7 @@ Otras configuraciones de agentes detectadas en la máquina: existe `~/.codex/con
 | `assets/audio/music/battleThemeA.mp3` | cynicmusic | CC0 | ninguna |
 | `assets/audio/music/bossbattle_22k.wav` | Juhani Junkala | CC0 | ninguna |
 | `assets/audio/spells/` (16) | p0ss, Spell Sounds Starter Pack | **CC-BY-SA 3.0** | **atribuir** y compartir igual los derivados (son WAV aunque el pack los llame .ogg) |
+| `assets/audio/spells/shock.ogg`, `thunder.ogg` | Flare (flare-game, `soundfx/powers`), copiados del 2D | **CC-BY-SA 3.0** | **atribuir**; rayos de la Trampa y la Tormenta eléctricas |
 | `assets/ui/kill_rewards/`, `assets/ui/touch/` | el autor (copiados del 2D) | propios | mantener en sincronía con el 2D (`tools/sync_2d.sh`) |
 
 Pesos: `models/chars` 143 MB, `models/nature` 19 MB, `assets/ui/kill_rewards` 19 MB (diez PNG

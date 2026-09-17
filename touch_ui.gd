@@ -27,7 +27,12 @@ func _draw() -> void:
 		Color(1, 1, 1, 1.0 if main._joy_idx >= 0 else 0.85))
 
 	for b in main.button_rects():
-		_ability(b, font)
+		if int(b["idx"]) == main.CROUCH_BTN:
+			_crouch(b, font)
+		elif int(b["idx"]) == main.ORDERS_BTN:
+			_orders(b, font)
+		else:
+			_ability(b, font)
 
 
 func _ability(b: Dictionary, font: Font) -> void:
@@ -88,6 +93,52 @@ func _ability(b: Dictionary, font: Font) -> void:
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, 4, Color(0, 0, 0, 0.9))
 	draw_string(font, Vector2(c.x - ss.x / 2.0, ty), sub,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.95))
+
+
+## Órdenes del Rey liche: la orden puesta (▲ Atacar, ● Reagrupar, ▼ Emboscada) y, al arrastrar, el
+## aro de alcance como al apuntar una habilidad.
+func _orders(b: Dictionary, font: Font) -> void:
+	var c: Vector2 = b["c"]
+	var r: float = b["r"]
+	var pressed: bool = main._aim_btn == main.ORDERS_BTN
+	var order: String = main.pf.minion_order
+	draw_circle(c, r * 0.92, Color(0.18, 0.26, 0.2, 0.85) if order != "ambush" else Color(0.3, 0.22, 0.12, 0.9))
+	_round(TEX.underlay, c, r * (1.06 if pressed else 1.0), Color(0.8, 1.2, 0.85, 0.95))
+	var icon := {"attack": "▲", "regroup": "●", "ambush": "▼"}.get(order, "▲") as String
+	var sz := font.get_string_size(icon, HORIZONTAL_ALIGNMENT_LEFT, -1, 28)
+	draw_string_outline(font, c + Vector2(-sz.x * 0.5, 10.0), icon, HORIZONTAL_ALIGNMENT_LEFT, -1, 28, 5, Color(0, 0, 0, 0.9))
+	draw_string(font, c + Vector2(-sz.x * 0.5, 10.0), icon, HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(0.85, 1.0, 0.8))
+	if pressed and main._aim_drag.length() >= main.AIM_DEAD:
+		draw_arc(c, main.AIM_RADIUS, 0.0, TAU, 64, Color(0.8, 1.0, 0.8, 0.45), 2.0)
+		draw_circle(c + main._aim_drag.limit_length(main.AIM_RADIUS), 10.0, Color(0.8, 1.0, 0.8, 0.8))
+	var sub := "Esqueletos: %s" % String(b["name"])
+	var ss := font.get_string_size(sub, HORIZONTAL_ALIGNMENT_CENTER, -1, 13)
+	var ty: float = c.y + r + 15.0
+	draw_string_outline(font, Vector2(c.x - ss.x / 2.0, ty), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, 4, Color(0, 0, 0, 0.9))
+	draw_string(font, Vector2(c.x - ss.x / 2.0, ty), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.85, 1.0, 0.8))
+
+
+## Agacharse: la misma base que los demás, una flecha hacia abajo y un aro dorado mientras está activo.
+func _crouch(b: Dictionary, font: Font) -> void:
+	var c: Vector2 = b["c"]
+	var r: float = b["r"]
+	var on: bool = main._touch_crouch
+	# Fondo oscuro propio: los demás botones llevan un icono de color y este solo una flecha, que
+	# sobre la hierba no se distinguía.
+	draw_circle(c, r * 0.92, Color(0.35, 0.28, 0.08, 0.85) if on else Color(0.05, 0.06, 0.1, 0.6))
+	_round(TEX.underlay, c, r, Color(1.3, 1.1, 0.6, 0.95) if on else Color(1, 1, 1, 0.85))
+	if on:
+		draw_arc(c, r - 3.0, 0.0, TAU, 40, Color(1.0, 0.85, 0.35, 0.95), 4.0, true)
+	var arrow := "▼"
+	var sz := font.get_string_size(arrow, HORIZONTAL_ALIGNMENT_LEFT, -1, 30)
+	draw_string_outline(font, c + Vector2(-sz.x * 0.5, 11.0), arrow, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, 5, Color(0, 0, 0, 0.9))
+	draw_string(font, c + Vector2(-sz.x * 0.5, 11.0), arrow, HORIZONTAL_ALIGNMENT_LEFT, -1, 30,
+		Color(1.0, 0.9, 0.5) if on else Color(1, 1, 1))
+	var sub: String = b["name"]
+	var ss := font.get_string_size(sub, HORIZONTAL_ALIGNMENT_CENTER, -1, 13)
+	var ty: float = c.y + r + 15.0
+	draw_string_outline(font, Vector2(c.x - ss.x / 2.0, ty), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, 4, Color(0, 0, 0, 0.9))
+	draw_string(font, Vector2(c.x - ss.x / 2.0, ty), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.95))
 
 
 func _round(tex: Texture2D, center: Vector2, radius: float, tint: Color) -> void:

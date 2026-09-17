@@ -9,7 +9,8 @@
 ##  - camina por la rejilla con NavGrid y se aparta de sus compañeros para no apelotonarse;
 ##  - rodea lo que el rival dejó puesto y se ve (trampas, balizas, nubes, tormentas, espinas) y sale
 ##    si le pilla dentro, como haría una persona (antes las pisaba a ciegas: 36 % del daño);
-##  - con munición guarda el último disparo para cuando el rival está cerca.
+##  - con munición guarda el último disparo para cuando el rival está cerca;
+##  - si un compañero ha caído y no tiene un rival encima, va a levantarlo agachándose a su lado.
 class_name BotBrain
 extends RefCounted
 
@@ -25,6 +26,9 @@ const REPATH := 0.5
 const ZONE_MARGIN := 4.0                # metros de holgura con el borde del gas
 const DANGER_MARGIN := 1.2              # metros de holgura con el borde de una zona rival
 const LAST_SHOT_REACH := 0.7            # el último disparo, solo con el rival a este tanto del alcance
+const REVIVE_SAFE := 8.0                # va a levantar a un caído si no tiene un rival más cerca que esto
+const CRAWL_STOP := 0.8                 # derribado, deja de arrastrarse a este tanto de Revive.RANGE (1,1 m)
+const CRAWL_GO := 1.0                   # y no vuelve a arrancar hasta que el compañero sale del alcance
 ## Distancia a la que quiere pelear cada leyenda (px del juego 2D; las que no están, 70 px).
 const DESIRED_RANGE := {"arquero": 380.0, "clerigo": 300.0, "liche": 340.0, "quimico": 340.0,
 	"tormentero": 340.0, "ilusionista": 360.0, "ciclope": 85.0, "caballero": 90.0, "rompemareas": 110.0}
@@ -45,6 +49,7 @@ var _strafe_t := 0.0
 var _stuck_t := 0.0
 var _nudge := Vector3.ZERO
 var _nudge_t := 0.0
+var _crawl_near := false
 
 
 func _init(p_f: Fighter, p_combat: Combat, p_main: Main) -> void:
@@ -57,9 +62,9 @@ func _init(p_f: Fighter, p_combat: Combat, p_main: Main) -> void:
 ## Una vuelta de física: piensa cuando toca y siempre conduce hacia su meta.
 func tick(delta: float) -> void:
 	if not f.alive():
-		f.wish = Vector3.ZERO
 		target = {}
 		_path.clear()
+		f.wish = _crawl_to_help() if f.downed else Vector3.ZERO
 		return
 	_t -= delta
 	if _t <= 0.0:
@@ -79,7 +84,9 @@ func _hp_frac() -> float:
 # ---------------------------------------------------------------- decisión
 
 func _think() -> void:
+	f.crouch = false                     # solo se agacha para levantar a alguien (abajo)
 	target = _pick_target()
+	_order_minions()
 	var hp := _hp_frac()
 	if fleeing and hp >= RECOVER_HP:
 		fleeing = false
@@ -99,6 +106,18 @@ func _think() -> void:
 			if not target.is_empty():
 				_use_abilities(d, fleeing)
 			return
+
+	# 1b. Un compañero caído y nadie encima: ir a su lado y agacharse para levantarlo (el bot
+	#     cooperativo del 2D; agacharse es el gesto que pidió el usuario).
+	var fallen := _fallen_ally()
+	if fallen != null and d > REVIVE_SAFE:
+		var gap := Vector2(fallen.pos().x - f.pos().x, fallen.pos().z - f.pos().z).length()
+		if gap > Revive.RANGE * 0.7:
+			_go(fallen.pos())
+		else:
+			_stop()
+			f.crouch = true
+		return
 
 	# 2. Con poca vida, huye del más cercano y lanza lo que le sirva para escapar.
 	if fleeing and not target.is_empty():
@@ -143,6 +162,30 @@ func _think() -> void:
 	_use_abilities(d, false)
 
 
+## Rey liche: sus esqueletos atacan mientras pelea y se reagrupan cuando huye. No emboscan.
+func _order_minions() -> void:
+	if f.minion_order == "ambush" or combat.minions.of(f).is_empty():
+		return
+	var want := "regroup" if fleeing else "attack"
+	if f.minion_order != want:
+		combat.minions.set_order(f, want)
+
+
+## El compañero caído más cercano, o null.
+func _fallen_ally() -> Fighter:
+	if f.team == Fighter.TEAM_HORDE:
+		return null                      # el jefe de la Horda no levanta a jefes de oleadas pasadas
+	var best: Fighter = null
+	var best_d := INF
+	for o: Fighter in combat.fighters:
+		if o != f and o.team == f.team and o.downed:
+			var od := o.pos().distance_to(f.pos())
+			if od < best_d:
+				best_d = od
+				best = o
+	return best
+
+
 ## El rival visible más cercano; se queda con el de antes mientras siga vivo, a la vista y a tiro.
 ## Un rival marcado por romper un señuelo de su equipo va antes que nadie.
 func _pick_target() -> Dictionary:
@@ -160,8 +203,30 @@ func _pick_target() -> Dictionary:
 		var d := f.pos().distance_to((target["node"] as Node3D).global_position)
 		if d <= STICKY_RANGE:
 			return target
-	var near := combat.foes_in(f.team, f.pos(), SEARCH_RANGE, 1, true)
+	# Primero a quien está en pie; a un derribado solo si no hay nadie más (rematar le quita tiempo).
+	var near := combat.foes_in(f.team, f.pos(), SEARCH_RANGE, 6, true)
+	for z in near:
+		if String(z.get("kind", "")) != "fighter" or float(z.get("hp", 0.0)) > 0.0:
+			return z
 	return near[0] if not near.is_empty() else {}
+
+
+## Derribado: se arrastra hacia el compañero en pie más cercano para que lo levante.
+func _crawl_to_help() -> Vector3:
+	var best: Fighter = null
+	var best_d := INF
+	for o: Fighter in combat.fighters:
+		if o != f and o.team == f.team and o.alive():
+			var od := o.pos().distance_to(f.pos())
+			if od < best_d:
+				best_d = od
+				best = o
+	_crawl_near = best != null and crawl_close(_crawl_near, best_d)
+	if best == null or _crawl_near:
+		return Vector3.ZERO
+	var to := best.pos() - f.pos()
+	to.y = 0.0
+	return to.normalized()
 
 
 func _still_valid(z: Dictionary) -> bool:
@@ -193,6 +258,8 @@ func _use_abilities(d: float, escaping: bool) -> void:
 			if escaping:
 				combat.try_cast(f, i, tpos)
 				if f.swap_t > 0.0:
+					# Se ha teletransportado al señuelo: lo que tenía cerca ya no es lo mismo.
+					target = _pick_target()
 					return
 			continue
 		if not f.ability_ready(i):
@@ -337,6 +404,13 @@ func _avoid_danger(pos: Vector3, dir: Vector3) -> Vector3:
 			for n in sp["nodes"]:
 				dir = steer_around(pos, dir, (n as Node3D).position, float(sp["rad"]))
 	return dir
+
+
+## Derribado junto a un compañero: ¿ya está lo bastante cerca para quedarse quieto? Con margen: para a
+## CRAWL_STOP del alcance y no arranca hasta CRAWL_GO. Antes paraba a 0,84 m y los cuerpos, que chocan
+## a 0,8, lo empujaban fuera del umbral: paraba y arrancaba en cada fotograma (la animación parpadeaba).
+static func crawl_close(was_close: bool, d: float) -> bool:
+	return d <= Revive.RANGE * (CRAWL_GO if was_close else CRAWL_STOP)
 
 
 ## ¿Dispara la básica? A tiro, y si le queda un solo disparo, solo con el rival bastante cerca: así

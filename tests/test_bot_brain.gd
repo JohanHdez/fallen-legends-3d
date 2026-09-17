@@ -2,7 +2,8 @@
 ##   godot --headless --path . -s tests/test_bot_brain.gd
 ## Cuándo dispara con munición (guarda el último disparo para cuando esté cerca) y cómo rodea una
 ## zona enemiga que se ve (trampa, baliza, nube, tormenta, espinas): sale si está dentro, no entra
-## si va hacia ella y no se desvía si no le estorba.
+## si va hacia ella y no se desvía si no le estorba. Y cuándo deja de arrastrarse una derribada hacia
+## el compañero (con margen, para que no pare y arranque en cada fotograma).
 extends SceneTree
 
 var failures := 0
@@ -17,6 +18,7 @@ func _check(ok: bool, msg: String) -> void:
 func _init() -> void:
 	_test_should_shoot()
 	_test_steer_around()
+	_test_crawl_close()
 	print("test_bot_brain: %s (%d fallos)" % ["OK" if failures == 0 else "FALLO", failures])
 	quit(1 if failures > 0 else 0)
 
@@ -70,3 +72,16 @@ func _test_steer_around() -> void:
 	# La altura no cuenta.
 	var high := Vector3(far.x, 3.0, far.z)
 	_check(BotBrain.steer_around(high, d, c, r).is_equal_approx(d), "la altura no cambia nada")
+
+
+func _test_crawl_close() -> void:
+	# Derribada arrastrándose hacia un compañero: para al llegar a su lado (dentro del alcance para que
+	# la levante) y no vuelve a arrancar hasta que él se aleje de verdad. Antes paraba y arrancaba a
+	# 0,84 m en cada fotograma: los cuerpos chocan a 0,8 m y el empujón la sacaba del umbral.
+	var r := Revive.RANGE
+	_check(not BotBrain.crawl_close(false, r * 2.0), "lejos: sigue arrastrándose")
+	_check(BotBrain.crawl_close(false, r * 0.75), "a su lado: para")
+	_check(BotBrain.crawl_close(true, r * 0.9), "parada y un poco más lejos: sigue parada")
+	_check(BotBrain.crawl_close(true, r * 0.85) == BotBrain.crawl_close(true, r * 0.84), "sin parpadeo junto al umbral")
+	_check(not BotBrain.crawl_close(true, r * 1.1), "si él se va del alcance, vuelve a arrastrarse")
+	_check(BotBrain.CRAWL_STOP < 1.0 and BotBrain.CRAWL_GO > BotBrain.CRAWL_STOP, "para dentro del alcance y arranca más lejos")
