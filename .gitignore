@@ -3,3 +3,6 @@
 *.import
 # Binarios de salida (el APK pesa 130 MB)
 export/
+
+# Ajustes personales de Claude Code (permisos locales): no se comparten
+.claude/settings.local.json

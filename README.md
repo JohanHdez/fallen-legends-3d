@@ -19,8 +19,11 @@ ser jugable. Eso explica dos cosas de su forma:
 - Las **cifras de vida, velocidad y habilidades salen de `data/*.tres` del juego 2D**, convertidas
   de píxeles a metros con `PX`. Donde una cifra ya no coincide está dicho en su sitio y por qué.
 
-Casi todo vive en `main.gd`, que es grande. Es deuda consciente de su origen como maqueta: partirlo
-es la primera tarea pendiente si esto sigue adelante.
+`main.gd` era un monolito de 4.600 líneas por su origen de maqueta. El 2026-09-16 se partió sin
+cambiar el juego (comprobado con trazas deterministas de la Horda): los datos de leyendas en
+`data/legend_data.gd`, los efectos en `fx/vfx.gd`, el combate de cualquier leyenda en
+`game/combat.gd` + `game/fighter.gd`, y los modos por equipos en `game/` y `ui/`. Arquitectura y
+reglas para trabajar en él: `CLAUDE.md`.
 
 ## Cómo abrirlo
 
@@ -38,6 +41,73 @@ godot --headless --path . --export-debug "Android" export/proto3d.apk
 ```
 
 El JDK 17 está en `~/Library/Java/jdk-17` y el SDK de Android en `~/Library/Android/sdk`.
+
+## Menú y modos de juego
+
+Al abrir el juego sale un **menú de inicio** sobre el mapa: eliges modo y leyenda y pulsas JUGAR
+(también con ratón, dedo o flechas y Enter). Con cualquier opción de línea de comandos, o en
+headless, se salta y se juega la Horda como siempre; `--mode=` elige directamente.
+
+| Modo | Qué es |
+|---|---|
+| **Horda** | Oleadas de criaturas sin fin, lo de abajo. |
+| **1v1, 2v2, 3v3, 4v4** | Tú más compañeros bot contra rivales bot, **al mejor de 3 rondas**. |
+
+Reglas por equipos (a petición del usuario, 2026-09-16):
+
+- **Una ronda la gana el equipo que deja al rival sin nadie en pie.** Dentro de la ronda **no se
+  reaparece**: si caes, la cámara sigue a un compañero vivo hasta que acaba. La partida la gana el
+  primero que se lleva **2 rondas**; si caen los dos equipos a la vez, la ronda no es de nadie.
+- Entre rondas hay **4 s de descanso** con el cartel del resultado; después todo lo que quedó en el
+  suelo desaparece, cada leyenda vuelve entera a su zona de salida y el gas se reinicia.
+- **Ritmo de pelea** (a petición del usuario, 2026-09-16, tras medir peleas de ~7 s):
+  - **Vida ×3** en todas las leyendas. La curación y el daño del gas también van ×3, para que no
+    pierdan peso.
+  - **Definitiva por carga**, no por recarga: empieza vacía en cada ronda y se llena con el daño que
+    haces con la básica y la táctica (el de 6 s de tu básica sin fallar, ×3 por la vida), más un
+    goteo de 45 s por si no pegas. Lo que hace la propia definitiva no la recarga. El botón enseña
+    el porcentaje.
+  - **Las básicas teledirigidas pueden fallar**: vuelan recto hacia donde apuntaste, solo corrigen
+    en los últimos 2 m y como mucho 40°/s, impactan al tocar a alguien por el camino y se apagan al
+    llegar a su alcance. En la Horda siguen sin fallar.
+  - **Mapa más corto**: el área limpia arranca al 65 % del mapa, así que las zonas de salida quedan
+    más cerca y cuevas y esquinas son gas desde el principio. El gas espera 25 s y cierra ×1,5.
+  - **Munición en la básica** (idea del usuario, estilo Brawl; el 2D no la tiene): 3 disparos que
+    vuelven de uno en uno. Se pueden soltar seguidos y luego hay que esperar, así que fallar cuesta.
+    Se ve en tres segmentos naranjas bajo tu vida y en arcos alrededor del botón de ataque; sin
+    munición suena a hueco y la barra parpadea. Solo ves la tuya. **La Ilusionista no tiene**: no
+    tiene habilidades de daño y su ventaja es la cantidad de disparos. La carga de la definitiva se
+    calcula igual que sin munición (rebajarla casi duplicaba las definitivas).
+
+    | Leyenda | Básica | Vuelve 1 disparo cada | Daño sostenido de la básica |
+    |---|---|---|---|
+    | Tormentero, Químico, Clérigo | cada 0,6 s | 1,0 s | −40 % |
+    | Rey liche | cada 0,7 s | 1,15 s | −40 % |
+    | Caballero esqueleto | cada 0,8 s | 1,0 s | −20 % |
+    | Rompemareas | cada 1,1 s | 1,4 s | −20 % |
+    | Ilusionista | cada 0,18 s | sin límite | ×1,6 (ver abajo) |
+  - **Pistola de la Ilusionista ×1,6** por equipos (petición del usuario; 9 → 14,4 por bala; en la
+    Horda sigue en 9): necesitaba ~70 balas para tumbar a cualquiera y ganaba 8 de 36 duelos. Medido
+    con 36 duelos por valor: ×1,3 gana 13, ×1,6 gana 16 y ×2,0 gana 19, pero con ×2,0 ya gana el
+    67 % por equipos; con ×1,6 gana el 50 %. Ni con ×2,0 le gana un duelo al Tormentero (su trampa
+    la deja aturdida dentro) ni al Rey liche (los esqueletos se comen las balas).
+- Tope de ronda: 150 s; si se agota, gana quien tenga más leyendas en pie y, si hay las mismas,
+  más vida.
+- **Regeneración**: tras **10 s sin recibir daño** (a petición del usuario; el 2D usa 4 s), cada
+  leyenda recupera el 8 % de su vida máxima por segundo (`player.REGEN_RATE` del 2D). Vale también
+  en la Horda.
+- Leyendas: la tuya, y las de los bots sin repetir dentro de un equipo (entre equipos sí; en el
+  duelo, contra otra distinta). Nombres encima de la barra, en azul los tuyos y en rojo los rivales.
+- Los bots (`game/bot_brain.gd`, adaptado del 2D) buscan al rival **visible** más cercano, pelean a
+  la distancia de su leyenda, huyen con poca vida, vuelven al área limpia si les pilla el gas y
+  caminan por la rejilla con A*. Agacharte en la hierba alta y la invisibilidad del Ilusionista les
+  despistan, y sus señuelos les engañan. Como haría una persona, **rodean lo que el rival dejó puesto
+  y se ve** (trampas, balizas, nubes, tormentas y espinas) y salen si les pilla dentro; antes lo
+  pisaban a ciegas y las trampas hacían el 36 % del daño. Con munición guardan el último disparo
+  para cuando el rival está cerca (a menos del 70 % del alcance).
+- **Pausa**: botón ☰ arriba a la izquierda o tecla **P**: Seguir, Reiniciar o volver al Menú (vale
+  también en la Horda). Al acabar la partida, pantalla final con rondas, bajas y caídas de cada
+  leyenda, y botones Revancha y Menú.
 
 ## Qué hay ahora
 
@@ -195,6 +265,15 @@ y **copian tu animación**: si conjuras, conjuran. **Sin tinte a propósito** (p
 el `decoy.gd` del juego los pinta de violeta para que TÚ los distingas, pero aquí la idea es que
 el enemigo no sepa cuál eres. Son **inmunes a las esporas** y un solo golpe los disipa.
 
+**Romper un señuelo marca a quien lo rompió** (idea del usuario, 2026-09-16; el 2D no lo tiene):
+durante **5 s** el equipo de la Ilusionista lo ve con un **contorno rojo a través de muros, rocas y
+hierba**, no puede esconderse agachado y los bots de ese equipo van a por él. Cuenta también si lo
+rompe su trampa, su zona o su esbirro; no cuenta si el señuelo caduca o si ella se intercambia con
+él. Romper otro vuelve a 5 s, no suma. Si te marcan a ti, un aviso rojo arriba te lo dice con la
+cuenta atrás. El contorno (`fx/mark_fx.gd`) son dos pasadas en `material_overlay`: la silueta
+escribe en el stencil sin mirar la profundidad y el borde, engordado en píxeles de pantalla, se
+pinta solo fuera de ella. Funciona en Forward+ y en Compatibilidad (móvil).
+
 ## Baliza Nox del Químico
 
 Con `beacon.gd` del juego: un **barril de 60 de vida que bloquea el paso**. Espera dormido y lo
@@ -249,9 +328,10 @@ reutiliza: compilarlo por burbuja cuesta y se filtra, y la guardia se enciende y
 
 ## Gas demoníaco: la zona que se cierra
 
-**Esto es de PvP, no de la horda.** En el juego iría solo en 1v1 a 4v4 (petición del usuario);
-aquí corre sobre la horda porque el prototipo no tiene PvP y es el único sitio donde se puede ver
-funcionando. `--nozone` lo apaga.
+**Pensado para PvP** (1v1 a 4v4, petición del usuario). Corre en la Horda y en los modos por
+equipos; en estos arranca al 65 % del mapa, espera 25 s, cierra ×1,5 más rápido, quema ×3 y se
+reinicia en cada ronda (ver "Menú y modos
+de juego"). Daña a todas las leyendas y criaturas que pille fuera. `--nozone` lo apaga.
 
 El gas **está en el borde del mapa desde el primer segundo**: el área limpia arranca siendo el
 círculo inscrito en el mapa, así que las cuatro esquinas ya son gas. A los **2 minutos** empieza a
@@ -275,11 +355,20 @@ Sondas: `--zonewait=N` acorta la espera y `--zonefast=N` acelera el cierre.
 
 ## Cubrirse y esconderse
 
-- **Peñascos** (`_scatter_cover`, 50 por mapa) con colisión propia: frenan igual al jugador y a las
-  criaturas. Se quedan pequeños respecto a la celda de 3 m a propósito, porque el campo de flujo de
-  las criaturas razona por celdas y no sabe que están ahí: hay que dejarles sitio para rodearlos.
-  Y no se ponen a menos de 3 celdas de donde aparece el jugador — en la primera prueba le tocó uno
-  encima y arrancó la partida subido a él, a 2,2 m del suelo.
+- **Peñascos** (`_scatter_cover`, ~47 por mapa). **Los personajes se metían dentro de ellos**
+  (2026-09-16): las rocas `Rock_Medium` miden ~3,2 m con el pivote desplazado casi 1 m, y puestas a
+  escala 1,4-2,1 con un cilindro de colisión de ~1 m, la roca visible era 3-5 veces su colisión
+  (`tests/rocks_probe.gd` lo medía en 3.300 de 3.600 fotogramas). Ahora cada peñasco ocupa **una
+  celda despejada** que pasa a bloqueada (el campo de flujo y los bots la rodean), se escala y se
+  centra por su huella real para caber en 1,3 m de radio, estirado a lo alto (~1,7-2 m, tapa a
+  alguien de pie), y **choca con su envolvente convexa real**. Se eligen con
+  `MapLayout.pick_cover_cells` sin cerrar pasillos ni dejar callejones, y nunca a menos de 3 celdas
+  de donde aparece el jugador (una vez le tocó uno encima y arrancó subido a él).
+- **Rocas de las cuevas**: las que dan a un pasillo se encajan en su celda (`MapLayout.fit_in_cell`):
+  hacia el suelo no asoman más de 10 cm y hacia las vecinas de muro se solapan, así que la pared se
+  ve continua y no hay huecos con pared invisible.
+- **Lápidas** del cementerio: medían 31 × 37 cm y no chocaban; ahora ~75 × 90 cm con caja de
+  colisión, y las criaturas brotan sobre la losa, delante de la piedra.
 - **Manchas de hierba alta** (`tall_grass`, 16 manchas): el triple de matas, solo las variedades
   altas y a mayor escala, para que se vea de lejos que ahí cabe alguien.
 - **Agacharse con Ctrl**: frena al 45 %, baja la cámara y usa las animaciones `Crouch_Idle` /
@@ -304,10 +393,15 @@ de "La parca" porque solo juegas tú, así que el título se gana por bajas tota
 | Shift | correr |
 | ratón | girar la cámara |
 | rueda | acercar / alejar |
-| clic izquierdo | atacar |
+| clic izquierdo o Q | básica (mantener: carga el mandoble del Rompemareas) |
+| clic derecho o E | táctica (mantener para ver el radio, soltar para lanzar) |
+| R | definitiva (igual) |
+| Ctrl | agacharse |
 | **C** | cambiar cámara: sobre el hombro ↔ vista alta tipo ARPG |
+| Tab, 1-7 | cambiar de leyenda (solo en la Horda) |
+| P o ☰ | pausa: Seguir, Reiniciar, Menú |
 | Esc | soltar el ratón |
-| Q | salir |
+| F10 | salir |
 
 **La tecla que importa es la C.** La vista alta es la comparación honesta contra tu isométrica
 actual: ahí se ve si el combate de zonas se sigue leyendo o no.
@@ -351,6 +445,19 @@ Ver `assets/CREDITS.txt`. Resumen de lo que ata:
 --nozone        sin gas que se cierre
 --zonewait=N    segundos hasta que el gas empieza a cerrar (por defecto 120)
 --zonefast=N    multiplica la velocidad de cierre, para verlo sin esperar
+--mode=M        horda | 1v1 | 2v2 | 3v3 | 4v4 | menu (sin menú; menu sirve para capturarlo)
+--legend=N      tu leyenda (0-6; 7-9 son las retiradas, solo en la Horda)
+--autoplay      por equipos, tu leyenda la lleva un bot (partidas enteras sin jugar)
+--rounds=N      rondas para ganar la partida (por defecto 2: al mejor de 3)
+--roundtime=S   tope de una ronda (por defecto 150 s)
+--autocast      en la Horda, lanza solo lo que esté listo hacia la criatura más cercana
+--probe=nombre  engancha tests/nombre.gd (rocks_probe, match_probe) y sale con 0 o 1
+```
+
+Partida de bots en headless, al mejor de 3, con traza cada 5 s:
+
+```
+godot --headless --fixed-fps 60 --path . -- --mode=4v4 --autoplay --log --probe=match_probe
 ```
 
 `--log` imprime además el reparto de especies: `vivos` por tipo y `salidas` acumuladas. Ojo al
@@ -388,6 +495,29 @@ muestras: para comprobar de verdad un sorteo por pesos hay que hacerlo aparte, c
 11. **No se puede medir rendimiento desde una ventana en segundo plano**: macOS la estrangula a 3 FPS
    y las cifras se contradicen (quitar 3.000 hierbas salía *más lento*). La única medida fiable se
    tomó con la ventana en primer plano: **40 esqueletos animados a 144 FPS**, física 13-16 ms.
+
+12. **`set_anchors_preset` con el nodo ya en el árbol conserva su tamaño** (2026-09-16): el menú,
+    el marcador y la pantalla final salían pegados arriba a la izquierda porque su raíz medía 0×0
+    pese a las anclas a pantalla completa. Con el nodo en el árbol hay que usar
+    `set_anchors_and_offsets_preset`.
+13. **`godot --check-only` no detecta llamadas a métodos inexistentes** sobre variables tipadas
+    (`main.no_existe()` parsea bien): solo identificadores sueltos y tipos. La red de seguridad de
+    verdad son las sondas en ejecución (`tools/check.sh`).
+14. **`match` es palabra reservada** en GDScript: no vale como nombre de variable.
+15. **`DisplayServer.is_touchscreen_available()` es true en cualquier escritorio** si
+    `emulate_touch_from_mouse` está activo: el Mac arrancaba en modo móvil (joystick en pantalla,
+    sin sombras, oleada 2). La emulación no cuenta; `--touch` sigue forzándolo.
+16. **En headless el renderizador de relleno no guarda las transformadas de un MultiMesh**
+    (`get_instance_transform` da la identidad): por eso `_multimesh` registra dónde coloca cada copia
+    (`_placed`) y las sondas leen de ahí.
+17. **Las rocas de Quaternius tienen el pivote descentrado** hasta 0,85 m y miden ~3,2 m: colocarlas
+    por su pivote y con una colisión "a ojo" las deja invadiendo pasillos. Se encajan por su huella.
+18. **Una barra por trozos no puede llevar `billboard` en cada trozo**: el billboard gira cada malla
+    sobre su propio origen, pero el desplazamiento lateral de cada segmento se queda en el mundo, así
+    que al girar la cámara los segmentos se montan. La barra de munición gira el nodo entero hacia la
+    cámara (`global_basis = cam.global_basis`) y sus trozos van sin billboard.
+19. **Medir el balance con bots engaña si los bots no ven lo que ve una persona**: pisaban todas las
+    trampas y balizas (36 % del daño). Rodearlas bajó al Químico del 80 % al 40 % de victorias.
 
 **Trampa del `--shot` en headless**: sin ventana, `get_viewport().get_texture().get_image()`
 devuelve nulo, y llamar a `save_png` sobre nulo **aborta la función** en GDScript. El `quit()` que

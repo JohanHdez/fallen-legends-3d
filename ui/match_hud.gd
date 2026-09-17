@@ -1,0 +1,220 @@
+## HUD de una partida por equipos: marcador y reloj arriba, últimas bajas a la derecha, cuenta
+## atrás cuando caes y la pantalla final con el resumen y los botones de Revancha y Menú.
+## Construido en código, con tamaños pensados para el dedo (botones de 64 px o más).
+class_name MatchHud
+extends Control
+
+var tm: TeamMode
+var _score: RichTextLabel
+var _goal: Label
+var _feed: RichTextLabel
+var _down: Label
+var _mark: Label
+var _end: PanelContainer
+var _banner: Label
+var _banner_t := 0.0
+
+
+func setup(p_tm: TeamMode) -> void:
+	tm = p_tm
+	# set_anchors_AND_OFFSETS_preset, no set_anchors_preset: ya en el árbol, la segunda conserva el
+	# tamaño que tenía el nodo (0×0) y todo lo "centrado" acababa en la esquina superior izquierda.
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var top := PanelContainer.new()
+	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top.add_theme_stylebox_override("panel", _box(Color(0.04, 0.05, 0.08, 0.72), 14))
+	top.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	top.offset_top = 10
+	top.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	add_child(top)
+	var col := VBoxContainer.new()
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_theme_constant_override("separation", 0)
+	top.add_child(col)
+	_score = RichTextLabel.new()
+	_score.bbcode_enabled = true
+	_score.fit_content = true
+	_score.scroll_active = false
+	_score.autowrap_mode = TextServer.AUTOWRAP_OFF
+	_score.custom_minimum_size = Vector2(420, 0)
+	_score.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_score.add_theme_font_size_override("normal_font_size", 30)
+	_score.add_theme_font_size_override("bold_font_size", 30)
+	col.add_child(_score)
+	_goal = _label(15, Color(0.85, 0.85, 0.9, 0.9))
+	_goal.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(_goal)
+
+	_feed = RichTextLabel.new()
+	_feed.bbcode_enabled = true
+	_feed.fit_content = true
+	_feed.scroll_active = false
+	_feed.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_feed.add_theme_font_size_override("normal_font_size", 18)
+	_feed.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	_feed.offset_left = -360
+	_feed.offset_top = 12
+	_feed.offset_right = -14
+	_feed.custom_minimum_size = Vector2(346, 0)
+	add_child(_feed)
+
+	_down = _label(34, Color(1, 0.86, 0.6))
+	_down.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_down.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_down.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_down.offset_top = -120
+	add_child(_down)
+
+	# Aviso cuando TE marcan por romper un señuelo: te ven a través de todo y no puedes esconderte.
+	_mark = _label(24, Color(1.0, 0.45, 0.4))
+	_mark.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_mark.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_mark.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_mark.offset_top = 104
+	add_child(_mark)
+
+	_banner = _label(58, Color(1, 0.86, 0.45))
+	_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_banner.offset_top = -210
+	_banner.add_theme_constant_override("outline_size", 10)
+	add_child(_banner)
+
+
+## Cartel grande en el centro (inicio y final de ronda), que se va solo.
+func banner(text: String, color := Color(1, 0.86, 0.45)) -> void:
+	_banner.text = text
+	_banner.add_theme_color_override("font_color", color)
+	_banner.modulate.a = 1.0
+	_banner_t = TeamMatch.ROUND_BREAK - 0.5
+
+
+func _label(sz: int, c: Color) -> Label:
+	var l := Label.new()
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	l.add_theme_font_size_override("font_size", sz)
+	l.add_theme_color_override("font_color", c)
+	l.add_theme_color_override("font_outline_color", Color.BLACK)
+	l.add_theme_constant_override("outline_size", 6)
+	return l
+
+
+func _box(c: Color, radius: int) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = c
+	sb.set_corner_radius_all(radius)
+	sb.content_margin_left = 18
+	sb.content_margin_right = 18
+	sb.content_margin_top = 6
+	sb.content_margin_bottom = 8
+	return sb
+
+
+static func _hex(c: Color) -> String:
+	return c.to_html(false)
+
+
+func _process(_delta: float) -> void:
+	if tm == null or tm.rules == null:
+		return
+	var m := tm.rules
+	var t := int(ceil(m.round_time_left))
+	# Rondas ganadas a los lados y, junto a cada equipo, un punto por leyenda: lleno en pie, hueco caída.
+	var dots := {1: "", 2: ""}
+	for f: Fighter in tm.combat.fighters:
+		dots[f.team] = String(dots[f.team]) + ("●" if f.alive() else "○")
+	_score.text = "[center][b][color=#%s]AZUL %d[/color][/b] [color=#%s]%s[/color]    Ronda %d · %d:%02d    [color=#%s]%s[/color] [b][color=#%s]%d ROJO[/color][/b][/center]" % [
+		_hex(TeamMode.TEAM_COLORS[1]), int(m.round_wins[1]), _hex(TeamMode.TEAM_COLORS[1]), dots[1],
+		m.round, t / 60, t % 60,
+		_hex(TeamMode.TEAM_COLORS[2]), dots[2], _hex(TeamMode.TEAM_COLORS[2]), int(m.round_wins[2])]
+	_goal.text = "%s · al mejor de %d · gana la ronda quien deja al rival sin nadie en pie" % [
+		String(GameModes.MODES[tm.mode]["name"]), m.rounds_to_win * 2 - 1]
+	if _banner_t > 0.0:
+		_banner_t -= _delta
+		_banner.modulate.a = clampf(_banner_t / 0.6, 0.0, 1.0)
+	var lines: Array = []
+	for e in m.feed:
+		if float(e["age"]) > 6.0:
+			continue
+		var victim := "[color=#%s]%s[/color]" % [_hex(TeamMode.TEAM_COLORS.get(int(e["victim_team"]), Color.WHITE)), e["victim"]]
+		if String(e["killer"]) == "":
+			lines.append("[right]%s cae en el gas[/right]" % victim)
+		else:
+			lines.append("[right][color=#%s]%s[/color]  ✕  %s[/right]" % [
+				_hex(TeamMode.TEAM_COLORS.get(int(e["killer_team"]), Color.WHITE)), e["killer"], victim])
+	_feed.text = "\n".join(lines.slice(maxi(lines.size() - 4, 0)))
+	var pf := tm.main.pf
+	if m.state == "playing" and pf != null and not pf.alive():
+		_down.text = "Has caído · miras a tu equipo hasta que acabe la ronda"
+	else:
+		_down.text = ""
+	if pf != null and pf.alive() and pf.marked_t > 0.0 and pf.mark_team != pf.team:
+		_mark.text = "¡Te han marcado por romper un señuelo! Te ven a través de todo · %d s" % int(ceil(pf.marked_t))
+	else:
+		_mark.text = ""
+
+
+## Pantalla final: resultado, marcador por leyenda y botones.
+func show_end() -> void:
+	if _end != null:
+		return
+	var r := tm.rules.result
+	var winner := int(r.get("winner", 0))
+	_end = PanelContainer.new()
+	_end.add_theme_stylebox_override("panel", _box(Color(0.03, 0.04, 0.07, 0.9), 18))
+	_end.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_end.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_end.grow_vertical = Control.GROW_DIRECTION_BOTH
+	add_child(_end)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 10)
+	_end.add_child(col)
+	var title := _label(52, Color(1, 0.82, 0.35) if winner == 1 else (Color(1, 0.45, 0.4) if winner == 2 else Color(0.9, 0.9, 0.95)))
+	title.text = "¡VICTORIA!" if winner == 1 else ("DERROTA" if winner == 2 else "EMPATE")
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(title)
+	var why := _label(20, Color(0.85, 0.85, 0.9))
+	why.text = "Rondas %d - %d" % [int(r["rounds"][1]), int(r["rounds"][2])]
+	why.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(why)
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 28)
+	col.add_child(grid)
+	for team in [1, 2]:
+		var head := _label(22, TeamMode.TEAM_COLORS[team])
+		head.text = "Equipo %s" % TeamMode.TEAM_NAMES[team]
+		grid.add_child(head)
+		for txt in ["Bajas", "Caídas"]:
+			var h := _label(16, Color(0.7, 0.7, 0.75))
+			h.text = txt
+			grid.add_child(h)
+		for fid in tm.rules.scores:
+			var s: Dictionary = tm.rules.scores[fid]
+			if int(s["team"]) != team:
+				continue
+			for txt in [String(s["name"]), str(s["kills"]), str(s["deaths"])]:
+				var cell := _label(20, Color(1, 1, 0.8) if s["is_player"] else Color.WHITE)
+				cell.text = txt
+				grid.add_child(cell)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 24)
+	col.add_child(row)
+	row.add_child(_button("Revancha", tm.restart))
+	row.add_child(_button("Menú", tm.to_menu))
+
+
+func _button(text: String, cb: Callable) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.custom_minimum_size = Vector2(220, 68)
+	b.add_theme_font_size_override("font_size", 28)
+	b.add_theme_stylebox_override("normal", _box(Color(0.18, 0.2, 0.28, 0.95), 12))
+	b.add_theme_stylebox_override("hover", _box(Color(0.28, 0.32, 0.45, 0.98), 12))
+	b.add_theme_stylebox_override("pressed", _box(Color(0.12, 0.13, 0.18, 1.0), 12))
+	b.pressed.connect(cb)
+	return b

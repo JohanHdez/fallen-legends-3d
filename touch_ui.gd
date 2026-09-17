@@ -58,7 +58,7 @@ func _ability(b: Dictionary, font: Font) -> void:
 	var frac: float = main.cooldown_fraction(i)
 	if frac > 0.0 and not swap:
 		_sector(c, r * 0.92, frac, Color(0, 0, 0, 0.55))
-		var cds: String = "%.1f" % main.cooldown_left(i)
+		var cds: String = main.cooldown_text(i)      # segundos, o "73%" si la definitiva va por carga
 		var cs := font.get_string_size(cds, HORIZONTAL_ALIGNMENT_CENTER, -1, 22)
 		draw_string_outline(font, c + Vector2(-cs.x / 2.0, 8.0), cds,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 22, 4, Color(0, 0, 0, 0.9))
@@ -70,6 +70,11 @@ func _ability(b: Dictionary, font: Font) -> void:
 		var at: Vector2 = c + Vector2(r * 0.55 - cs2.x / 2.0, r * 0.8)
 		draw_string_outline(font, at, chs, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, 4, Color(0, 0, 0, 0.9))
 		draw_string(font, at, chs, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.8, 1.0, 0.6))
+
+	# Munición de la básica por equipos: un arco por disparo alrededor del botón, como la barra
+	# que va debajo de tu vida.
+	if i == 0 and main.pf != null and main.pf.ammo_max > 0:
+		_ammo_arcs(c, r + 7.0, main.pf.ammo_max, main.pf.ammo_level())
 
 	# Apuntado a mano: anillo de alcance y el icono desplazado hacia donde caerá.
 	if pressed and main._aim_drag.length() >= main.AIM_DEAD:
@@ -88,6 +93,20 @@ func _ability(b: Dictionary, font: Font) -> void:
 func _round(tex: Texture2D, center: Vector2, radius: float, tint: Color) -> void:
 	draw_texture_rect(tex, Rect2(center - Vector2(radius, radius),
 		Vector2(radius * 2.0, radius * 2.0)), false, tint)
+
+
+## Un arco por disparo, desde las 12 en sentido horario: lleno, a medias (el que vuelve) o vacío.
+func _ammo_arcs(center: Vector2, radius: float, n: int, level: float) -> void:
+	var span := TAU / float(n)
+	var gap := 0.16
+	for k in n:
+		var a0 := -PI / 2.0 + span * k + gap * 0.5
+		var a1 := a0 + span - gap
+		draw_arc(center, radius, a0, a1, 24, Color(0, 0, 0, 0.6), 8.0, true)
+		var fill := AmmoBar.segment_fill(level, k)
+		if fill > 0.0:
+			var col := AmmoBar.COL_PART if AmmoBar.is_partial(level, k) else AmmoBar.COL_FULL
+			draw_arc(center, radius, a0, a0 + (a1 - a0) * fill, 24, col, 5.0, true)
 
 
 ## Sector desde las 12 en sentido horario con la recarga pendiente.

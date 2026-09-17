@@ -1,26 +1,32 @@
-## PROTOTIPO DESECHABLE — no forma parte de Fallen Legends, vive fuera del repo.
-##
-## Levanta EL MISMO mapa de horda que genera el juego: `map_builder.gd` es una copia literal
-## del que usa Fallen Legends, así que la rejilla (pasillos, cuevas, cementerio) es idéntica.
-## Lo que cambia es el dibujo: en vez de tiles isométricos de Flare, props 3D del
-## Stylized Nature MegaKit de Quaternius, recorridos por una cámara en tercera persona.
+## Fallen Legends 3D: la escena de juego. Construye el mapa (el MISMO que genera la Horda del juego
+## 2D con `map_builder.gd`, dibujado con props 3D del Stylized Nature MegaKit de Quaternius), la
+## cámara en tercera persona, el control del jugador (teclado, ratón y táctil), la horda y el HUD.
+## El combate de cualquier leyenda vive en game/combat.gd, los datos en data/legend_data.gd y los
+## efectos en fx/vfx.gd. Arquitectura y reglas: CLAUDE.md.
+class_name Main
 extends Node3D
 
 # Todo vive DENTRO del proyecto: en un APK no existen las rutas del Mac.
 const NATURE := "res://models/nature/"
-const CHARS := "res://models/chars/"
-const OUTFITS := CHARS
-const BESTIARY := CHARS
-const UAL1 := CHARS + "UAL1_Standard.glb"
-const UAL2 := CHARS + "UAL2_Standard.glb"
+const CHARS := LegendData.CHARS
+const OUTFITS := LegendData.OUTFITS
+const BESTIARY := LegendData.BESTIARY
+const UAL1 := LegendData.UAL1
+const UAL2 := LegendData.UAL2
 
 const CELL := 3.0        # metros por celda del mapa del juego (192x96 px en isométrico)
 const WALL_H := 7.0      # alto de la colisión de los muros
 const MAP_SEED := 1234
 const GRASS_FIELDS := 16       # manchas de hierba alta donde esconderse agachado
 const GRASS_RADIUS := 3        # celdas de radio de cada mancha
-const COVER_ROCKS := 50        # peñascos sueltos por el campo, para cubrirse
-const CROUCH_MULT := 0.45      # lo que frena ir agachado
+const COVER_ROCKS := 50        # peñascos sueltos por el campo, para cubrirse (uno por celda despejada)
+const COVER_RADIUS := 1.3      # radio de la huella de un peñasco: cabe en su celda de 3 m con holgura
+const COVER_STRETCH := 1.4     # estirado en vertical, para que tape a alguien de pie (~1,7-2 m)
+const COVER_GAP := 2           # celdas (Chebyshev) entre peñascos
+const WALL_ROCK_TOL := 0.1     # roca de muro: lo que puede asomar hacia el suelo (media celda = 1,5)
+const WALL_ROCK_OVER := 1.0    # ...y lo que puede solaparse con la roca vecina, para que la pared no tenga huecos
+const WALL_ROCK_STRETCH := 1.1
+const GRAVE_STONE := Vector3(2.2, 5.2, 0.7)   # escala del guijarro que hace de lápida: ~0,75 × 0,9 m
 # --- gas demoníaco (la zona que se cierra) ---
 # OJO DE DISEÑO: en el juego esto sería SOLO para PvP (1v1 a 4v4), nunca para la horda; aquí va
 # sobre la horda porque el prototipo no tiene PvP y es el único sitio donde se puede ver.
@@ -32,11 +38,9 @@ const ZONE_WALL_H := 16.0      # alto de la pared de humo
 # Negro VIOLÁCEO, no negro puro: de noche el negro puro es invisible y de día es un agujero.
 const ZONE_COL := Color(0.09, 0.05, 0.13)
 const ZONE_GLOW := Color(0.40, 0.09, 0.50)
-const SPOTTED_TIME := 3.0      # segundos que te delata atacar desde la maleza
 const WALK := 6.0
 const SPRINT := 10.0
 const GRAVITY := 22.0
-const TURN_SPEED := 10.0
 
 # --- horda ---
 const ZOMBIE_HP := 60.0
@@ -44,40 +48,14 @@ const ZOMBIE_SPEED := 2.4
 const ZOMBIE_DMG := 9.0
 const ZOMBIE_REACH := 2.0
 const ZOMBIE_SWING := 1.5      # s entre zarpazos
-const ZOMBIE_TINT := Color(0.55, 0.78, 0.48)
 const MAX_ALIVE := 40          # tope de zombis vivos a la vez
 
-# Especies de la horda. Los esqueletos son el grueso; el licántropo y el duende son los dos
-# modelos del Bestiary que estaban sin usar, y le dan a la oleada la variedad que tiene el
-# juego, donde conviven zombis, licántropos y duendes. `w` es el peso del sorteo y el resto
-# multiplica sobre ZOMBIE_HP/SPEED/DMG. `eyes` es la escala de las brasas (0 = sin brasas).
-const SPECIES := [
-	{"id": "esqueleto", "model": "Skeleton_B.glb", "w": 33, "hp": 1.0, "spd": 1.0, "dmg": 1.0,
-		"eyes": 1.0, "eye_col": Color(1.0, 0.45, 0.12), "rad": 0.40, "cap": 1.7,
-		"bar": 2.1, "bscale": 1.0, "reach": 2.0, "minw": 1, "grave": true},
-	{"id": "esqueleto_hacha", "model": "Skeleton_A.glb", "w": 15, "hp": 1.2, "spd": 0.95, "dmg": 1.25,
-		"eyes": 1.0, "eye_col": Color(1.0, 0.45, 0.12), "rad": 0.40, "cap": 1.7,
-		"bar": 2.1, "bscale": 1.0, "reach": 2.0, "minw": 1, "grave": true},
-	{"id": "licantropo", "model": "Lycan.glb", "w": 19, "hp": 1.8, "spd": 1.35, "dmg": 1.4,
-		"eyes": 1.4, "eye_col": Color(1.0, 0.85, 0.25), "rad": 0.50, "cap": 1.9,
-		"bar": 2.4, "bscale": 1.2, "reach": 2.3, "minw": 1, "grave": false},
-	{"id": "duende", "model": "Puglin.glb", "w": 30, "hp": 0.65, "spd": 1.5, "dmg": 0.6,
-		"eyes": 0.6, "eye_col": Color(0.5, 1.0, 0.35), "rad": 0.30, "cap": 0.9,
-		"bar": 1.3, "bscale": 0.7, "reach": 1.6, "minw": 1, "grave": false},
-	# El guardián infernal es el tercer modelo que quedaba sin usar y aquí hace de élite:
-	# raro, lento y muy duro, para que las oleadas tardías cambien de forma y no solo de número.
-	{"id": "guardian", "model": "Hellwarden.glb", "w": 7, "hp": 3.2, "spd": 0.85, "dmg": 1.9,
-		"eyes": 1.5, "eye_col": Color(1.0, 0.25, 0.10), "rad": 0.60, "cap": 2.2,
-		"bar": 2.7, "bscale": 1.45, "reach": 2.5, "minw": 3, "grave": false},
-]
+# Especies de la horda: data/legend_data.gd.
+const SPECIES := LegendData.SPECIES
 const SPAWN_EVERY := 0.5       # sale uno cada tanto, como el goteo del juego
 const WAVE_BREAK := 4.0
 const FLOW_EVERY := 0.4        # cada cuánto se recalcula el campo de flujo
 const PLAYER_HP := 210.0   # el Tormentero, de data/classes/tormentero.tres
-const ATTACK_RANGE := 2.8
-const ATTACK_ARC := 1.05       # ~60 grados a cada lado
-const ATTACK_DMG := 55.0
-const RESPAWN_TIME := 4.0
 
 # Jefe: el Rompemareas (Tidebreaker) en vez del dragón, que en el juego sigue siendo 2D.
 const BOSS_WAVE := 5           # sale en esta oleada y en sus múltiplos
@@ -88,36 +66,17 @@ const BOSS_REACH := 3.2
 
 # --- poderes del Tormentero, con los números reales de data/abilities/*.tres ---
 # El juego mide en píxeles: una celda son 192 px y aquí 3 m, así que 1 px = 1,5625 cm.
-const PX := CELL / 192.0
+const PX := LegendData.PX        # = CELL / 192
 const CROSS := 14.0            # tamaño de la mira en píxeles de pantalla
 
 # Esfera voltaica (PROJECTILE, teledirigida)
 # Trampa eléctrica (TRAP)
 # Tormenta eléctrica (ZONE + campo residual)
-const SPARK := Color(0.62, 0.80, 1.0)
+const SPARK := Vfx.SPARK
 
-# --- esporas del Clérigo, con las constantes de player.gd del juego ---
-const SPORE_BASE := 10.0
-const SPORE_GROWTH := 1.5           # el daño por segundo crece esto por cada infectado
-const SPORE_MAX_TARGETS := 7        # ...contando como mucho estos
-const SPORE_DPS_MAX := 60.0
-const SPORE_KILL_MULT := 1.25       # y se multiplica cada vez que muere un infectado
-const SPORE_SPREAD := 320.0 * PX    # radio de contagio al morir uno (5 m)
-const SPORE_CONTAGION := 130.0 * PX # radio de contagio por cercanía en cada tick (2 m)
-const SPORE_TIME := 10.0
-const SPORE_COL := Color(0.5, 1.0, 0.4)
-const SLOW_MULT := 0.5         # el gas Nox deja a la mitad de velocidad (Ability.slow)
+# Esporas, baliza, guardia, señuelos, carga del mandoble y esbirros: game/combat.gd.
+const SLOW_MULT := Combat.SLOW_MULT
 
-# --- Baliza Nox (beacon.gd del juego) ---
-const BEACON_HP := 60.0
-const BEACON_TRIGGER := 130.0 * PX   # 2 m: a esa distancia un enemigo la despierta
-const BEACON_TINT := Color(0.95, 1.35, 0.8)
-
-# --- guardia automática del Caballero (player.GUARD_* del juego) ---
-const GUARD_DELAY := 0.4         # segundos quieto antes de cubrirse solo
-const GUARD_DAMAGE_MULT := 0.55  # recibe un 45 % menos
-const KNOCK_TIME := 0.35         # lo que dura el desplazamiento de un empujón
-const PULL_SPEED := 14.0         # m/s a los que el arpón arrastra: el tiempo sale de la distancia
 
 # Capas de colisión, con el mismo reparto que el juego: el jugador choca SOLO con el mundo
 # (muros, valla, balizas) y las criaturas chocan con el mundo y entre sí. Así una embestida
@@ -143,29 +102,10 @@ const DAY_CYCLE := DAY_TIME + DUSK_TIME + NIGHT_TIME + DAWN_TIME
 const DAY_COLOR := Color(1.0, 0.98, 0.94)
 const NIGHT_COLOR := Color(0.34, 0.4, 0.66)
 const EYE_COL := Color(1.0, 0.45, 0.12)   # brasa naranja en las cuencas
-const GUARD_COL := Color(0.45, 0.72, 1.0) # azul acero de la guardia del Caballero
 # Encaje del arma en el puño: ajustado a ojo sobre capturas, es lo único aquí que no sale de un dato.
 const WEAPON_POS := Vector3(0.0, 0.02, 0.0)
 const WEAPON_ROT := Vector3(0.0, 0.0, 0.0)
-const TORCH_RANGE := 14.0
 
-# --- señuelos del Ilusionista (decoy.gd del juego) ---
-const DECOY_TINT := Color(0.85, 0.8, 1.35)   # holograma violeta claro
-const DECOY_ALPHA := 0.88
-const DECOY_FLICKER := 0.06
-const DECOY_SPAWN_FX := 1.5                  # lo que tarda en materializarse
-const SWAP_COOLDOWN := 1.0                   # el intercambio se salta la recarga, pero no es gratis
-
-# --- carga del Mandoble del Rompemareas (player.CHARGE_*) ---
-const MELEE_ARC := 126.0       # abanico por defecto de un golpe cuerpo a cuerpo, en grados
-const CHARGE_MIN := 0.35      # mantener menos de esto es un mandoble normal
-const CHARGE_MAX := 1.2       # y más de esto ya no suma
-const CHARGE_RAD := 1.9       # radio a tope
-const CHARGE_DMG := 2.1       # daño a tope
-
-# --- esbirros del Liche (player.gd del juego) ---
-const MINION_HARD_MAX := 10
-const ARMY_KEEP := 3
 
 # --- táctil ---
 # Las mismas que scripts/touch_controls.gd del juego 2D, para que el tacto sea idéntico.
@@ -177,152 +117,17 @@ const ABILITY_SIDE := 92.0
 const MAIN_SIDE := 120.0
 const AIM_DEAD := 18.0       # px de arrastre a partir de los cuales se apunta a mano
 const AIM_RADIUS := 110.0    # px de arrastre que equivalen al alcance máximo
-const NECK := 1.55   # altura del cuello en la pose de reposo
-
-## Las 7 leyendas jugables de Net.CLASSES, con los modelos que usa el juego
-## (player.CLASS_SPRITES para las criaturas, Wardrobe.DEFAULT_LOOKS para las humanas)
-## y sus cifras reales de data/classes/*.tres. Vida y velocidad tal cual; la velocidad
-## se convierte de px/s a m/s con PX.
-const HEAD_M := {"path": CHARS + "Superhero_Male_FullBody.gltf", "cut": NECK}
-const HEAD_F := {"path": CHARS + "Superhero_Female_FullBody.gltf", "cut": NECK}
-
-
-## Las 21 habilidades, con los números tal cual de data/abilities/*.tres. Las distancias van en
-## píxeles del juego y se convierten a metros con PX. `cast` es el preaviso (cast_time).
-const ABILITIES := {
-	"tormentero": [
-		{"n": "Esfera voltaica", "col": Color(0.6, 0.8, 1.0), "sfx": "proj_bolt", "k": "proj", "cd": 0.6, "cast": 0.14, "dmg": 22.0, "rng": 660.0, "spd": 620.0, "homing": true},
-		{"n": "Trampa eléctrica", "col": Color(0.5, 0.75, 1.0), "sfx": "trap", "k": "trap", "cd": 10.0, "cast": 0.3, "dmg": 18.0, "rng": 320.0, "rad": 320.0,
-		 "dur": 10.0, "stun": 1.0, "chg": 3, "act": 5, "tick": 2.0, "tgt": 3},
-		{"n": "Tormenta eléctrica", "col": Color(0.7, 0.8, 1.0), "sfx": "storm", "k": "zone", "cd": 30.0, "cast": 0.5, "dmg": 45.0, "rng": 520.0, "rad": 340.0,
-		 "delay": 0.6, "stun": 3.5, "field": 10.0, "fdmg": 18.0, "fstun": 1.2},
-	],
-	"clerigo": [
-		{"n": "Golpe sagrado", "col": Color(1.0, 0.95, 0.5), "sfx": "proj_arcane", "k": "proj", "cd": 0.6, "cast": 0.12, "dmg": 16.0, "rng": 680.0, "spd": 620.0, "homing": true},
-		# Sanación: el .tres trae 260 px; x3 a petición del usuario (4,1 m -> 12,2 m).
-		{"n": "Sanación", "col": Color(0.5, 1.0, 0.5), "sfx": "heal", "k": "heal", "cd": 7.0, "cast": 0.3, "heal": 35.0, "rad": 780.0},
-		{"n": "Esporas", "col": Color(0.5, 1.0, 0.4), "sfx": "gas", "k": "spores", "cd": 40.0, "cast": 0.5, "dmg": 10.0, "rng": 520.0, "rad": 190.0,
-		 "field": 10.0, "fdmg": 10.0, "tick": 1.0},
-	],
-	"ilusionista": [
-		{"n": "Pistola espectral", "col": Color(0.85, 0.65, 1.0), "sfx": "proj_arcane", "k": "proj", "cd": 0.18, "cast": 0.06, "dmg": 9.0, "rng": 820.0, "spd": 1000.0, "homing": true},
-		{"n": "Señuelo", "col": Color(0.75, 0.55, 1.0), "sfx": "decoy", "k": "decoy", "cd": 12.0, "cast": 0.25,
-		 "rng": 260.0, "rad": 70.0, "dur": 20.0, "n_decoys": 1, "move": 2, "swap": true, "act": 1},
-		{"n": "Fiesta de clones", "col": Color(0.9, 0.6, 1.0), "sfx": "decoy", "k": "decoy", "cd": 35.0, "cast": 0.4,
-		 "rng": 0.0, "rad": 110.0, "dur": 20.0, "n_decoys": 5, "move": 1, "invis": 4.0},
-	],
-	"caballero": [
-		{"n": "Lanzada", "col": Color(0.85, 0.85, 0.9), "sfx": "melee", "k": "melee", "cd": 0.8, "cast": 0.2, "dmg": 30.0, "rad": 115.0},
-		# Corte de hacha (antes "Carga con escudo": el Caballero lleva hacha, no escudo).
-		# Preaviso largo a propósito: se ve tomar impulso antes de salir.
-		{"n": "Corte de hacha", "col": Color(0.8, 0.3, 0.3), "sfx": "dash", "k": "dash", "cd": 7.0,
-		 "cast": 0.12, "dmg": 25.0, "rng": 700.0, "rad": 70.0, "spd": 900.0, "shove": 5.5, "sync": true},
-		# Muro de espinas: el .tres trae 46 px de radio; x3 a petición del usuario (0,7 m -> 2,2 m).
-		{"n": "Muro de espinas", "col": Color(0.85, 0.35, 0.3), "sfx": "spikes", "k": "spikes", "cd": 25.0, "cast": 0.5, "dmg": 20.0, "rng": 840.0, "rad": 138.0,
-		 "dur": 10.0, "stun": 2.0, "tick": 1.0},
-	],
-	"rompemareas": [
-		{"n": "Mandoble de ancla", "col": Color(0.85, 0.72, 0.45), "sfx": "melee", "k": "melee", "cd": 1.1, "cast": 0.3,
-		 "dmg": 60.0, "rad": 170.0, "charge": true, "dust": true, "arc": 180.0},
-		# "Enganche", no "Arponazo": lo que lanza es su ANCLA encadenada, no un arpón (nombre
-		# elegido por el usuario). SIN teledirigir (petición suya): se clava donde apuntaste, no
-		# persigue a nadie. A cambio `catch` es ancho —190 px = 3,0 m— para que el que estaba ahí
-		# cuando la tiraste siga entrando aunque se haya movido un poco. Dos números que ya NO coinciden con `data/abilities/arponazo.tres`, los dos a
-		# petición suya: recarga 20 s (el .tres dice 7) y alcance 1200 px = 19 m (el .tres dice 520
-		# = 8,3 m). `--cd=N` recorta las recargas para probar sin esperar.
-		{"n": "Enganche", "col": Color(0.8, 0.68, 0.42), "sfx": "harpoon", "k": "proj", "cd": 20.0, "cast": 0.3, "dmg": 34.0, "rng": 1200.0, "spd": 780.0,
-		 "stun": 0.5, "pull": true, "solid": "anchor", "catch": 190.0},
-		{"n": "Ancla clavada", "col": Color(0.85, 0.7, 0.4), "sfx": "buff", "k": "buff", "cd": 26.0, "cast": 0.5, "dmg": 26.0, "rng": 300.0, "dur": 5.0,
-		 "resist": 0.3, "root": true, "tick": 0.8},
-	],
-	"liche": [
-		{"n": "Rayo gélido", "col": Color(0.5, 0.9, 1.0), "sfx": "proj_frost", "k": "proj", "cd": 0.7, "cast": 0.14, "dmg": 26.0, "rng": 700.0, "spd": 650.0, "homing": true},
-		{"n": "Alzar esqueleto", "col": Color(0.85, 0.9, 0.75), "sfx": "summon", "k": "summon", "cd": 6.0, "cast": 0.3, "rad": 70.0, "chg": 3, "count": 1},
-		{"n": "Alzar ejército", "col": Color(0.8, 0.9, 0.7), "sfx": "summon", "k": "summon", "cd": 30.0, "cast": 0.6, "rng": 400.0, "rad": 90.0, "count": 7},
-	],
-	"quimico": [
-		{"n": "Frasco corrosivo", "col": Color(0.75, 0.95, 0.3), "sfx": "proj_flask", "k": "proj", "cd": 0.6, "cast": 0.12, "dmg": 20.0, "rng": 640.0, "spd": 640.0, "homing": true},
-		{"n": "Baliza Nox", "col": Color(0.75, 0.95, 0.3), "sfx": "trap", "k": "beacon", "cd": 10.0, "cast": 0.3,
-		 "dmg": 8.0, "rng": 320.0, "rad": 320.0, "dur": 10.0, "chg": 3, "act": 5, "tick": 0.5, "slow": 0.5},
-		{"n": "Granada Nox", "col": Color(0.6, 0.95, 0.25), "sfx": "gas", "k": "gas", "cd": 30.0, "cast": 0.5, "dmg": 10.0, "rng": 560.0, "rad": 460.0,
-		 "field": 20.0, "fdmg": 10.0, "tick": 1.0, "slow": 0.5},
-	],
-	"guerrero": [
-		{"n": "Tajo", "col": Color(1.0, 0.85, 0.6), "sfx": "melee", "k": "melee", "cd": 0.8, "cast": 0.12, "dmg": 30.0, "rad": 80.0},
-		{"n": "Embestida", "col": Color(1.0, 0.5, 0.3), "sfx": "dash", "k": "dash", "cd": 6.0, "cast": 0.3,
-		 "dmg": 20.0, "rng": 220.0, "rad": 70.0, "spd": 700.0, "shove": 3.5, "anim": "Shield_Dash"},
-		{"n": "Terremoto", "col": Color(0.8, 0.6, 0.3), "sfx": "burst", "k": "zone", "cd": 10.0, "cast": 0.5, "dmg": 45.0, "rng": 0.0, "rad": 170.0,
-		 "delay": 0.7, "knock": 5.5, "fx": "dust", "field": 0.3, "fdmg": 0.0, "anim": "Sword_Regular_B"},
-	],
-	"arquero": [
-		{"n": "Flecha", "col": Color(0.9, 0.9, 0.7), "sfx": "harpoon", "k": "proj", "cd": 0.45, "cast": 0.12, "dmg": 18.0, "rng": 820.0, "spd": 760.0},
-		# Retirada: la única carga que va HACIA ATRÁS. Sin daño: es una esquiva.
-		{"n": "Retirada", "col": Color(0.7, 0.9, 1.0), "sfx": "dash", "k": "dash", "cd": 6.0, "cast": 0.12,
-		 "dmg": 0.0, "rng": 190.0, "rad": 0.0, "spd": 1100.0, "back": true, "anim": "Roll"},
-		{"n": "Lluvia de flechas", "col": Color(0.8, 0.9, 0.4), "sfx": "spikes", "k": "zone", "cd": 9.0, "cast": 0.45, "dmg": 50.0, "rng": 620.0, "rad": 130.0,
-		 "delay": 0.9, "fx": "arrows", "field": 0.3, "fdmg": 0.0},
-	],
-	"ciclope": [
-		{"n": "Mazazo", "col": Color(0.8, 0.8, 0.7), "sfx": "melee", "k": "melee", "cd": 1.3, "cast": 0.22, "dmg": 48.0, "rad": 100.0,
-		 "anim": "Sword_Regular_A"},
-		{"n": "Lanzar roca", "col": Color(0.55, 0.5, 0.45), "sfx": "proj_flask", "k": "proj", "cd": 5.0, "cast": 0.35, "dmg": 42.0, "rng": 620.0, "spd": 480.0,
-		 "anim": "OverhandThrow", "adur": 1.0},
-		{"n": "Golpe de tierra", "col": Color(0.6, 0.5, 0.3), "sfx": "burst", "k": "zone", "cd": 9.0, "cast": 0.4, "dmg": 60.0, "rng": 0.0, "rad": 180.0,
-		 "delay": 0.8, "knock": 8.0, "fx": "dust", "field": 0.3, "fdmg": 0.0, "anim": "Sword_Regular_A"},
-	],
-}
-
-const LEGENDS := [
-	{"id": "tormentero", "name": "Tormentero", "hp": 210.0, "speed": 225.0, "tint": Color(0.55, 0.75, 1.0),
-	 "models": [HEAD_M, CHARS + "Male_Peasant.gltf", CHARS + "Male_Ranger_Head_Hood.gltf",
-		CHARS + "Male_Ranger_Acc_Pauldron.gltf"]},
-	{"id": "clerigo", "name": "Clérigo", "hp": 240.0, "speed": 220.0, "tint": Color.WHITE,
-	 "models": [HEAD_M, CHARS + "Male_Ranger.gltf"]},
-	{"id": "ilusionista", "name": "Ilusionista", "hp": 200.0, "speed": 240.0, "tint": Color.WHITE,
-	 "models": [HEAD_F, CHARS + "Female_Ranger.gltf", CHARS + "Hair_Long.gltf"]},
-	{"id": "caballero", "name": "Caballero esqueleto", "hp": 380.0, "speed": 200.0, "tint": Color.WHITE, "guard": true,
-	 "models": [CHARS + "Skeleton_A.glb"]},
-	{"id": "rompemareas", "name": "Rompemareas", "hp": 360.0, "speed": 205.0, "tint": Color.WHITE,
-	 "models": [CHARS + "Tidebreaker.glb"]},
-	{"id": "liche", "name": "Rey liche", "hp": 220.0, "speed": 215.0, "tint": Color(0.60, 0.85, 0.75),
-	 "models": [CHARS + "Skeleton_B.glb"]},
-	{"id": "quimico", "name": "Químico", "hp": 230.0, "speed": 225.0, "tint": Color.WHITE,
-	 "models": [CHARS + "Imp.glb"]},
-	# --- de aquí abajo, FUERA DE LA ROTACIÓN (ver PLAYABLE) ---
-	# Las tres RETIRADAS del juego (Net.RETIRED_CLASSES): siguen con datos y habilidades, pero no
-	# se pueden elegir "hasta pulirlas". Parte de por qué están sin pulir es que no tienen arte:
-	# guerrero y arquero no salen en Wardrobe.DEFAULT_LOOKS (caen al atuendo del Clérigo) y el
-	# cíclope usa el hobgoblin 2D "de relleno hasta tener un sprite propio". El aspecto que llevan
-	# aquí es una propuesta, no algo heredado. Se quedan escritas pero apartadas, igual que en el
-	# juego: `--legend=7`, `8` o `9` las saca para probarlas, Tab y las teclas no las tocan.
-	# Túnica de peón (sin capucha) + hombrera y el pelo rapado a la vista: con Male_Ranger salía
-	# calcado al Clérigo, porque esa pieza trae capucha y tapaba el pelo.
-	{"id": "guerrero", "name": "Guerrero", "hp": 280.0, "speed": 210.0, "tint": Color(1.24, 0.86, 0.74),
-	 "models": [HEAD_M, CHARS + "Male_Peasant.gltf", CHARS + "Male_Ranger_Acc_Pauldron.gltf",
-		CHARS + "Hair_Buzzed.gltf"], "weapon": "sword"},
-	# Tinte suave: con el verde de su clase a tope el pelo salía turquesa.
-	{"id": "arquero", "name": "Arquero", "hp": 200.0, "speed": 245.0, "tint": Color(0.92, 1.1, 0.95),
-	 "models": [HEAD_F, CHARS + "Female_Peasant.gltf", CHARS + "Hair_Long.gltf"], "weapon": "bow"},
-	# El cíclope del juego es un hobgoblin: un duende GRANDE. Aquí es el mismo Puglin de la horda
-	# a ×2,6, que lo deja en 2,4 m — la misma altura que sus 210 px del juego a 85,6 px/m. El
-	# tinte azulado es el suyo de player.CLASS_SPRITES.
-	{"id": "ciclope", "name": "Cíclope", "hp": 400.0, "speed": 185.0, "tint": Color(0.7, 0.8, 1.1),
-	 "models": [CHARS + "Puglin.glb"], "scale": 2.6, "weapon": "club"},
-]
-
-## Cuántas de LEGENDS entran en la rotación. Las de después son las retiradas del juego.
-const PLAYABLE := 7
-
-# Solo se injertan las animaciones que se usan: copiarlas las 43 por personaje cuesta caro
-# cuando hay 40 zombis en pantalla.
-# Roll = la voltereta de Retirada del Arquero. Las de UAL2 van en su propia pasada.
-const HERO_ANIMS := "Idle,Jog_Fwd,Sword_Attack,Spell_Simple_Shoot,Death01,Roll,Crouch_Idle,Crouch_Fwd"
-# Sword_Regular_A (0,43 s) y _B (0,53 s) miden casi lo que dura un preaviso, así que salen a
-# velocidad casi natural. Sword_Heavy_Combo dura 4,33 s: estirado al preaviso salía a 12x, un
-# temblor en vez de un mazazo.
-const HERO_ANIMS_2 := "OverhandThrow,Sword_Regular_A,Sword_Regular_B,Shield_Dash"
-const ZOMBIE_ANIMS_1 := "Death01,Sword_Attack"
-const ZOMBIE_ANIMS_2 := "Zombie_Idle,Zombie_Walk_Fwd,Zombie_Scratch"
+# Datos de leyendas y habilidades: data/legend_data.gd. Alias para no tocar cada uso.
+const NECK := LegendData.NECK
+const HEAD_M := LegendData.HEAD_M
+const HEAD_F := LegendData.HEAD_F
+const ABILITIES := LegendData.ABILITIES
+const LEGENDS := LegendData.LEGENDS
+const PLAYABLE := LegendData.PLAYABLE
+const HERO_ANIMS := LegendData.HERO_ANIMS
+const HERO_ANIMS_2 := LegendData.HERO_ANIMS_2
+const ZOMBIE_ANIMS_1 := LegendData.ZOMBIE_ANIMS_1
+const ZOMBIE_ANIMS_2 := LegendData.ZOMBIE_ANIMS_2
 
 # Qué prop dibuja cada celda bloqueada, según la zona del juego (0 campo, 1 cueva, 2 cementerio).
 const FOREST := ["CommonTree_1", "CommonTree_2", "CommonTree_3", "CommonTree_4", "CommonTree_5",
@@ -341,33 +146,55 @@ const GRAVE_DECOR := ["Grass_Wispy_Short", "Pebble_Square_1", "Pebble_Square_4",
 # Colores del suelo por zona: pradera, roca de cueva, tierra de cementerio.
 const GROUND := [Color(0.26, 0.37, 0.19), Color(0.26, 0.26, 0.28), Color(0.32, 0.29, 0.23)]
 
-var grid: Array
+var grid: Array                   # [x][y], transpuesta de la de MapBuilder (ver _ready)
 var zones: Array
+var _mb_grid: Array               # [y][x], la de MapBuilder tal cual: para sus funciones
+var _mb_zones: Array
+var _cover_cells := {}            # Vector2i -> true: celdas ocupadas por un peñasco de cobertura
 var tall_grass: Array             # [x][y] true = hierba alta: agachado ahí no te ven
 var mw := 0
 var mh := 0
 var rng := RandomNumberGenerator.new()
+var vfx: Vfx                      # efectos visuales (fx/vfx.gd)
+var combat: Combat                # habilidades, daño y leyendas (game/combat.gd)
+var pf: Fighter = null            # tu leyenda (combat.fighters[0])
+var _mode := "horda"              # "menu", "horda", "1v1", "2v2", "3v3" o "4v4" (GameModes)
+var team_mode: TeamMode = null    # partida por equipos (null en la Horda y en el menú)
+var nav: NavGrid = null           # navegación de los bots
+
+# Alias de tu leyenda, para que la cámara, el control y el HUD se lean como antes.
+var player: CharacterBody3D:
+	get: return pf.body if pf != null else null
+var player_model: Node3D:
+	get: return pf.model if pf != null else null
+var player_anims: Array:
+	get: return pf.anims if pf != null else []
+var player_anim: AnimationPlayer:
+	get: return pf.anim if pf != null else null
+var _legend: int:
+	get: return pf.legend if pf != null else 0
+var _php: float:
+	get: return pf.hp() if pf != null else 0.0
+	set(v):
+		if pf != null:
+			pf.rec["hp"] = v
+var _chg: Array:                  # lo lee touch_ui.gd
+	get: return pf.chg if pf != null else [0, 0, 0]
 var _gltf_cache := {}
 
-var player: CharacterBody3D
-var player_anim: AnimationPlayer      # la primera capa, para consultar estado
-var player_anims: Array = []          # todas las capas, para reproducir en bloque
-var player_model: Node3D
 var pivot: Node3D
 var spring: SpringArm3D
 var cam: Camera3D
 var hud: Label
 var _yaw := 0.0
 var _pitch := -0.26
-var _attacking := false
-var _legend := 0
-var _cast_anim_t := 0.0   # mientras corre, la animación de conjuro manda sobre andar/correr
 var _cam_mode := 0        # 0 = sobre el hombro, 1 = vista alta tipo ARPG
 var _cam_height := 1.5
 var _shot := ""           # --shot=ruta.png: captura y sale (para enseñar el prototipo sin jugarlo)
 var _shot_wait := 30
 var _dbg := false
 var _props := 0
+var _placed := {}         # ruta de modelo -> transformadas de sus copias (MultiMesh); lo leen las sondas
 
 var zombies: Array = []        # {node, anim, hp, swing_t, dead_t}
 var _flow: Array = []          # campo de flujo: _flow[x][y] = celda siguiente hacia el jugador
@@ -377,17 +204,13 @@ var _left_to_spawn := 0
 var _spawn_t := 0.0
 var _break_t := 0.0
 var _kills := 0
-var _streak := 0                   # bajas desde la última muerte
 var _first_kill_done := false
 var _badge_img: TextureRect = null
 var _badge_cap: Label = null
 var _badge_tween: Tween = null
 var _badge_tex := {}
-var _php := 210.0
-var _pdead_t := 0.0
 var _spawn_cells: Array = []
 var _grave_cells: Array = []
-var _zombie_mats := {}
 var _zombie_proto: Node3D = null      # el esqueleto de espada; también sirve de esbirro del liche
 var _species_proto := {}              # id de especie -> modelo del que se duplican los demás
 var _spawned := {}                    # cuántas han salido de cada especie (solo para --log)
@@ -399,55 +222,7 @@ var _sfx_next := 0
 var _sfx_cache := {}
 var _fx_cache := {}
 var _music_boss := false
-var _hurt_t := 0.0
 
-var _cd := [0.0, 0.0, 0.0]          # recarga restante de cada ranura
-var _chg := [0, 0, 0]               # cargas disponibles (las habilidades que las usan)
-var _chg_t := [0.0, 0.0, 0.0]
-var _windup := -1.0                # preaviso en curso (cast_time), como Caster.windups
-var _windup_idx := -1
-var _windup_at := Vector3.ZERO
-var bolts: Array = []              # esferas en vuelo
-var traps: Array = []              # trampas puestas
-var storms: Array = []             # tormentas y sus nubes
-var sparks: Array = []             # destellos de rayo, puramente visuales
-var spikes: Array = []             # muros de espinas creciendo
-var allies: Array = []             # esbirros del liche y señuelos del ilusionista
-var _buff_left := 0.0
-var _buff_resist := 0.0
-var _buff_root := false
-var _buff_dmg := 0.0
-var _buff_rad := 0.0
-var _buff_tick := 0.0
-var _buff_fx: Node3D = null
-var _dash_vec := Vector3.ZERO
-var _dash_left := 0.0
-var _dash_dmg := 0.0
-var _dash_rad := 0.0
-var _dash_hit := {}
-var _dash_shove := 0.0
-var _dash_speed := 0.0
-var _dash_done := 0.0
-var _dash_t := 0.0
-var _dash_dur := 1.0
-var _dash_total := 0.0
-var _dash_from := Vector3.ZERO
-var _dash_want := 0.0
-var _spore_dps := 0.0
-var _spore_tick := 0.0
-var _hidden_t := 0.0
-var _crouch := false              # agachado: más lento, y oculto si estás en hierba alta
-var _spotted_t := 0.0             # atacar te delata unos segundos aunque sigas agachado
-var _last_seen := Vector3.ZERO    # dónde te vieron por última vez: adonde van mientras te escondes
-var _prev_ppos := Vector3.ZERO
-var _player_step := Vector3.ZERO
-var _swing_charge_t := 0.0
-var _swap_t := 0.0
-var _still_t := 0.0
-var _guard := false
-var _guard_fx: Node3D = null
-var _bubble_sh: Shader = null     # uno para todas: compilarlo por burbuja cuesta y se filtra
-var player_bar: Node3D = null
 var sun: DirectionalLight3D = null
 var world_env: Environment = null
 var _day_t := 0.0
@@ -466,13 +241,7 @@ var _zone_wait := ZONE_WAIT       # --zonewait=N lo acorta para probar
 var _zone_fast := 1.0             # --zonefast=N acelera el cierre para probar
 var _touch_crouch := false        # el botón de agacharse en táctil
 var _brasas_n := -1.0             # último valor de noche aplicado a las brasas
-var _cd_cap := 0.0                # --cd=N: recorta TODAS las recargas, solo para pruebas
 var _cycle := DAY_CYCLE
-var torch: OmniLight3D = null
-var _charge_mult := 1.0
-var beacons: Array = []            # barriles de gas del Químico
-var _summon_queue: Array = []
-var _summon_t := 0.0
 var _aim_ring: MeshInstance3D = null
 var _aim_dot: MeshInstance3D = null
 var _preview := -1                 # qué habilidad se está apuntando (-1 ninguna)
@@ -490,15 +259,29 @@ var _aim_idx := -1
 
 func _ready() -> void:
 	_collect_args()
+	# `is_touchscreen_available()` devuelve true en cualquier escritorio porque project.godot activa
+	# `emulate_touch_from_mouse` (para probar el táctil con el ratón): el Mac arrancaba SIEMPRE en
+	# modo móvil, con joystick en pantalla, sin capturar el ratón, sin sombras y en la oleada 2. La
+	# emulación no cuenta como pantalla táctil; `--touch` la sigue forzando para probar.
+	var real_touchscreen := DisplayServer.is_touchscreen_available() and not Input.is_emulating_touch_from_mouse()
 	touch = OS.has_feature("mobile") or OS.has_feature("web_ios") or OS.has_feature("web_android") \
-		or DisplayServer.is_touchscreen_available() or _args.has("touch")
+		or real_touchscreen or _args.has("touch")
+	_mode = _pick_mode()
 	rng.seed = MAP_SEED
+	vfx = Vfx.new(self, rng, touch)
+	combat = Combat.new(self, vfx)
 	var t0 := Time.get_ticks_msec()
 	var m: Dictionary = MapBuilder.horde_map(MAP_SEED)
-	grid = m["grid"]
-	zones = m["zones"]
+	# MapBuilder guarda [y][x] y este script lee [x][y] en todas partes: antes se dibujaba el mapa
+	# TRANSPUESTO y las celdas de MapBuilder (bordes, tumbas) caían en otro sitio; 11 de las 121
+	# celdas de entrada de la horda eran roca de cueva. Se transpone una vez aquí, y las llamadas a
+	# MapBuilder usan las rejillas originales (_mb_grid, _mb_zones).
+	_mb_grid = m["grid"]
+	_mb_zones = m["zones"]
+	grid = MapLayout.transpose(_mb_grid)
+	zones = MapLayout.transpose(_mb_zones)
 	mw = grid.size()
-	mh = (grid[0] as Array).size()
+	mh = (grid[0] as PackedInt32Array).size()
 	print("mapa %dx%d generado con el MISMO map_builder.gd del juego" % [mw, mh])
 
 	_setup_environment()
@@ -506,28 +289,53 @@ func _ready() -> void:
 	_build_blockers()
 	_build_grass_fields()      # antes que la decoración: decide dónde va la hierba alta
 	if not _args.has("nodecor"):
+		_scatter_cover()           # antes que la decoración: su celda deja de ser suelo
 		_scatter_decor()
-		_scatter_cover()
 	_build_graves(m)
 	_build_collision()
 	_spawn_player()
-	_spawn_companions()
+	if _mode == "horda":
+		_spawn_companions()
 	_build_hud()
-	if not _args.has("nozone"):
+	if not _args.has("nozone") and _mode != "menu":
 		if _args.has("zonewait"):
 			_zone_wait = maxf(float(_args["zonewait"]), 0.0)
 		if _args.has("zonefast"):
 			_zone_fast = maxf(float(_args["zonefast"]), 0.1)
 		_setup_zone()
-	_setup_horde()
+	if _mode == "menu":
+		_setup_menu()
+	elif GameModes.is_pvp(_mode):
+		team_mode = TeamMode.new(self)
+		team_mode.setup(_mode)
+	else:
+		_setup_horde()
 	_build_aim()
-	reset_abilities()
+	if _mode != "menu" and team_mode == null:
+		reset_abilities()
 	_setup_music()
-	_setup_touch()
+	if _mode != "menu":
+		_setup_touch()
+		# Pausa con Seguir / Reiniciar / Menú: por encima del táctil, para que el botón se pueda pulsar.
+		var pause_layer := CanvasLayer.new()
+		pause_layer.layer = 40
+		add_child(pause_layer)
+		var pause := PauseMenu.new()
+		pause_layer.add_child(pause)
+		pause.setup(self)
 	_apply_cam_args()
-	if _shot == "" and not touch:
+	if _shot == "" and not touch and _mode != "menu":
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	print("construido en %d ms — %d props" % [Time.get_ticks_msec() - t0, _props])
+	# --probe=nombre: engancha tests/nombre.gd como hijo, igual que las sondas del juego 2D. La
+	# sonda mira el estado de la partida y sale con código 0 (bien) o 1 (fallo).
+	if _args.has("probe"):
+		var probe_script := load("res://tests/%s.gd" % String(_args["probe"])) as Script
+		if probe_script == null:
+			push_error("no existe la sonda tests/%s.gd" % _args["probe"])
+			get_tree().quit(2)
+		else:
+			add_child(probe_script.new())
 
 
 ## Opciones de línea de comandos, para sacar vistas sin tener que jugar:
@@ -576,14 +384,15 @@ func _apply_cam_args() -> void:
 	if _args.has("near"):
 		_spawn_cells = _cells_around(_cell_of(player.position), maxi(3, int(_args["near"]) if String(_args["near"]).is_valid_int() else 10))
 		print("aparición cercana: %d celdas" % _spawn_cells.size())
-	if _args.has("legend"):
+	if _args.has("legend") and team_mode == null and _mode != "menu":
 		# Salta el recorte de PLAYABLE a propósito: es la única vía a las retiradas.
+		# (Por equipos la aplica TeamMode antes de repartir leyendas a los bots.)
 		set_legend(int(_args["legend"]))
 	if _args.has("boss"):
 		_spawn_boss()      # después de --near, para que salga al lado (solo pruebas)
 	if _args.has("cd"):
-		_cd_cap = maxf(float(_args["cd"]), 0.1)
-		print("recargas recortadas a %.1f s (solo prueba)" % _cd_cap)
+		combat.cd_cap = maxf(float(_args["cd"]), 0.1)
+		print("recargas recortadas a %.1f s (solo prueba)" % combat.cd_cap)
 	if _args.has("dianas"):
 		var n := int(_args["dianas"]) if String(_args["dianas"]).is_valid_int() else 4
 		_spawn_targets(n)
@@ -800,12 +609,51 @@ func _build_blockers() -> void:
 				pool = BONEYARD
 			var name: String = pool[rng.randi() % pool.size()]
 			var xf := Transform3D.IDENTITY
-			xf = xf.rotated(Vector3.UP, rng.randf() * TAU)
-			xf = xf.scaled(Vector3.ONE * rng.randf_range(0.85, 1.15))
-			xf.origin = _cell_pos(x, y) + Vector3(rng.randf_range(-0.5, 0.5), 0, rng.randf_range(-0.5, 0.5))
-			by_model.get_or_add(name, []).append(xf)
+			if pool == CAVE_ROCK and _next_to_floor(x, y):
+				# Roca que da a un pasillo: las de Quaternius miden ~3,2 m con el pivote desplazado y,
+				# puestas a escala 1 con ±0,5 m de holgura, invadían el pasillo hasta 2 m más allá de
+				# su caja de colisión: las criaturas se pegaban a la caja y quedaban medio metidas en
+				# la piedra. Encajada por su huella real no asoma al suelo más de WALL_ROCK_TOL, y se
+				# solapa con sus vecinas de muro para que no queden huecos con pared invisible.
+				var shape := _rock_shape(NATURE + name + ".gltf")
+				var yaw := rng.randf() * TAU
+				var fit := MapLayout.fit_in_cell(shape["hull"], yaw, _blocked_around(x, y), CELL * 0.5,
+					WALL_ROCK_TOL, WALL_ROCK_OVER, rng.randf_range(1.0, 1.15))
+				xf = MapLayout.fit_transform(fit, yaw, _cell_pos(x, y), WALL_ROCK_STRETCH)
+			else:
+				# Árboles (el tronco no invade: asoma la copa, por encima de las cabezas) y rocas de
+				# dentro del macizo, que nadie puede tocar.
+				xf = xf.rotated(Vector3.UP, rng.randf() * TAU)
+				xf = xf.scaled(Vector3.ONE * rng.randf_range(0.85, 1.15))
+				xf.origin = _cell_pos(x, y) + Vector3(rng.randf_range(-0.5, 0.5), 0, rng.randf_range(-0.5, 0.5))
+			(by_model.get_or_add(name, []) as Array).append(xf)
 	for name in by_model:
 		_multimesh(NATURE + name + ".gltf", by_model[name])
+
+
+## Qué vecinas de (x, y) son muro, como [dx + 1][dz + 1]. Fuera del mapa cuenta como muro.
+func _blocked_around(x: int, y: int) -> Array:
+	var out: Array = []
+	for dx in [-1, 0, 1]:
+		var col: Array = []
+		for dy in [-1, 0, 1]:
+			var nx: int = x + dx
+			var ny: int = y + dy
+			col.append(nx < 0 or ny < 0 or nx >= mw or ny >= mh or not MapBuilder.walkable(grid[nx][ny]))
+		out.append(col)
+	return out
+
+
+## ¿Alguna de las 8 celdas vecinas es suelo? Es lo que decide si una roca de muro está a la vista y
+## al alcance de alguien.
+func _next_to_floor(x: int, y: int) -> bool:
+	for dx in [-1, 0, 1]:
+		for dy in [-1, 0, 1]:
+			var nx: int = x + dx
+			var ny: int = y + dy
+			if nx >= 0 and ny >= 0 and nx < mw and ny < mh and MapBuilder.walkable(grid[nx][ny]):
+				return true
+	return false
 
 
 ## Hierba, flores, setas y guijarros sobre el suelo transitable. Es lo que hace que
@@ -868,7 +716,7 @@ void fragment() {
 	_zone_wall.material_override = m
 	add_child(_zone_wall)
 
-	_zone_ring = _ring(1.0, ZONE_GLOW, 0.45)     # aro en el suelo, para ver el borde exacto
+	_zone_ring = vfx.ring(1.0, ZONE_GLOW, 0.45)     # aro en el suelo, para ver el borde exacto
 	add_child(_zone_ring)
 	_build_zone_veil()
 	_apply_zone()
@@ -941,13 +789,15 @@ func _tick_zone(delta: float) -> void:
 	if _zone_hurt > 0.0:
 		return
 	_zone_hurt = 0.5
-	if _php > 0.0 and _outside_zone(player.global_position):
-		_damage_player(ZONE_DPS * 0.5)
-		_burst("smoke_02", player.global_position + Vector3(0, 1.0, 0),
-			Color(ZONE_GLOW.r, ZONE_GLOW.g, ZONE_GLOW.b, 0.5), 8, 0.9, 1.2, 0.8, 0.35, 80.0, 0.6)
+	for f: Fighter in combat.fighters:
+		if f.alive() and _outside_zone(f.pos()):
+			# Por equipos la vida va ×3 y el gas también: si no, dejaría de apretar.
+			combat.hurt(f.rec, ZONE_DPS * 0.5 * f.hp_mult)
+			vfx.burst("smoke_02", f.pos() + Vector3(0, 1.0, 0),
+				Color(ZONE_GLOW.r, ZONE_GLOW.g, ZONE_GLOW.b, 0.5), 8, 0.9, 1.2, 0.8, 0.35, 80.0, 0.6)
 	for z in zombies:
 		if z["dead_t"] < 0.0 and _outside_zone((z["node"] as Node3D).global_position):
-			_damage_zombie(z, ZONE_DPS * 0.5)
+			combat.hurt(z, ZONE_DPS * 0.5)
 
 
 func _outside_zone(at: Vector3) -> bool:
@@ -998,45 +848,66 @@ func _build_grass_fields() -> void:
 	print("hierba alta: %d manchas, %d celdas" % [placed, cells])
 
 
-## Peñascos sueltos por el campo para cubrirse. Llevan colisión propia (capa del mundo), así que
-## frenan igual al jugador y a las criaturas. Se quedan pequeños respecto a la celda de 3 m a
-## propósito: el campo de flujo de las criaturas razona por celdas y no sabe que están ahí, así
-## que hay que dejarles sitio de sobra para rodearlos.
+## Peñascos sueltos por el campo para cubrirse. Antes eran rocas a escala 1,4-2,1 (4,5-7 m de ancho)
+## con un cilindro de colisión de ~1 m centrado en el pivote, y el pivote de estas rocas está
+## desplazado casi un metro: los personajes se metían DENTRO de la roca (tests/rocks_probe.gd lo
+## medía en 3.300 de cada 3.600 fotogramas). Ahora cada peñasco:
+##  - ocupa UNA celda despejada (MapLayout.pick_cover_cells) que pasa a MOUNTAIN, así que el campo de
+##    flujo lo rodea, nadie aparece encima y no cierra pasillos;
+##  - se escala y se centra por su huella real para caber en COVER_RADIUS, estirado en vertical;
+##  - choca con su envolvente convexa real, con los puntos ya transformados (sin formas escaladas).
 func _scatter_cover() -> void:
-	var by_model := {}
 	var body := StaticBody3D.new()
 	body.collision_layer = L_WORLD
 	body.collision_mask = 0
 	add_child(body)
-	var n := 0
-	# Lejos de donde aparece el jugador: en la primera prueba le tocó un peñasco justo encima y
-	# arrancó la partida subido a él, a 2,2 m del suelo.
-	var home := _spawn_cell()
-	for i in COVER_ROCKS * 10:
-		if n >= COVER_ROCKS:
-			break
-		var x := rng.randi_range(2, mw - 3)
-		var y := rng.randi_range(2, mh - 3)
-		if not MapBuilder.walkable(grid[x][y]) or zones[x][y] != 0 or tall_grass[x][y]:
+	var by_model := {}
+	var cells := MapLayout.pick_cover_cells(grid, zones, tall_grass, _spawn_cell(), COVER_ROCKS, COVER_GAP, rng)
+	for c in cells:
+		var name := "Rock_Medium_%d" % (1 + rng.randi() % 3)
+		var shape := _rock_shape(NATURE + name + ".gltf")
+		if shape.is_empty():
 			continue
-		if Vector2(x - home.x, y - home.y).length() < 3.0:
-			continue
-		var p := _cell_pos(x, y)
-		var sc := rng.randf_range(1.4, 2.1)
-		var xf := Transform3D.IDENTITY.rotated(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * sc)
-		xf.origin = p
-		by_model.get_or_add("Rock_Medium_%d" % (1 + rng.randi() % 3), []).append(xf)
+		var yaw := rng.randf() * TAU
+		var fit := MapLayout.fit_footprint(shape["hull"], yaw, COVER_RADIUS * rng.randf_range(0.85, 1.0))
+		var xf := MapLayout.fit_transform(fit, yaw, _cell_pos(c.x, c.y), COVER_STRETCH)
+		(by_model.get_or_add(name, []) as Array).append(xf)
+		var pts := PackedVector3Array()
+		for p: Vector3 in shape["hull3d"]:
+			pts.append(xf * p)
+		var convex := ConvexPolygonShape3D.new()
+		convex.points = pts
 		var cs := CollisionShape3D.new()
-		var cyl := CylinderShape3D.new()
-		cyl.radius = 0.52 * sc     # ajustado al bulto visible: si es menor, te metes dentro de la roca
-		cyl.height = 2.2
-		cs.shape = cyl
-		cs.position = p + Vector3(0, 1.1, 0)
+		cs.shape = convex
 		body.add_child(cs)
-		n += 1
+		grid[c.x][c.y] = MapBuilder.MOUNTAIN
+		_cover_cells[c] = true
 	for name in by_model:
 		_multimesh(NATURE + name + ".gltf", by_model[name])
-	print("peñascos de cobertura: %d" % n)
+	print("peñascos de cobertura: %d" % cells.size())
+
+
+## Huella en planta y envolvente convexa (espacio del modelo) de una roca, calculadas una vez.
+func _rock_shape(path: String) -> Dictionary:
+	var key := "rock:" + path
+	if _fx_cache.has(key):
+		return _fx_cache[key]
+	var scene := _load_gltf(path)
+	if scene == null:
+		return {}
+	var verts := PackedVector3Array()
+	var hull3d := PackedVector3Array()
+	for e in _meshes_of(scene):
+		var mesh: Mesh = e["mesh"]
+		var exf: Transform3D = e["xform"]
+		for s in mesh.get_surface_count():
+			for v: Vector3 in mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]:
+				verts.append(exf * v)
+		for v: Vector3 in mesh.create_convex_shape(true, true).points:
+			hull3d.append(exf * v)
+	var out := {"hull": MapLayout.footprint(verts), "hull3d": hull3d}
+	_fx_cache[key] = out
+	return out
 
 
 func _scatter_decor() -> void:
@@ -1084,23 +955,41 @@ func _scatter_grass(by_model: Dictionary) -> void:
 				by_model.get_or_add(pool[rng.randi() % pool.size()], []).append(xf)
 
 
-## Las 6 tumbas que el juego coloca en el cementerio: losa plana y lápida de pie.
+## Las 6 tumbas que el juego coloca en el cementerio: losa plana y lápida de pie. La lápida medía
+## 31 × 37 cm y no chocaba con nada, así que las criaturas que salían de la tumba y cualquiera que
+## pasara la atravesaban. Ahora mide ~75 × 90 cm (GRAVE_STONE) y lleva su caja de colisión; las
+## criaturas brotan sobre la losa, delante de ella (_spawn_zombie).
 func _build_graves(m: Dictionary) -> void:
-	var cells: Array = MapBuilder.cemetery_graves(grid, zones, MAP_SEED)
+	var cells: Array = MapBuilder.cemetery_graves(_mb_grid, _mb_zones, MAP_SEED)
 	var slabs: Array = []
 	var stones: Array = []
+	var stone_path := NATURE + "Pebble_Square_4.gltf"
+	var stone_box := AABB()
+	var parts := _meshes_of(_load_gltf(stone_path)) if _load_gltf(stone_path) != null else []
+	if not parts.is_empty():
+		stone_box = (parts[0]["xform"] as Transform3D) * (parts[0]["mesh"] as Mesh).get_aabb()
+	var body := StaticBody3D.new()
+	body.collision_layer = L_WORLD
+	body.collision_mask = 0
+	add_child(body)
 	for c in cells:
 		var p := _cell_pos(c.x, c.y)
 		var yaw := rng.randf_range(-0.25, 0.25)
 		var slab := Transform3D.IDENTITY.rotated(Vector3.UP, yaw)
 		slab.origin = p + Vector3(0, 0.02, 0.4)
 		slabs.append(slab)
-		var stone := Transform3D.IDENTITY.rotated(Vector3.UP, yaw)
-		stone = stone.scaled(Vector3(0.9, 2.2, 0.35))
-		stone.origin = p + Vector3(0, 0, -0.9)
+		# Primero la escala y luego el giro: al revés el guijarro se cizalla.
+		var stone := Transform3D(Basis(Vector3.UP, yaw) * Basis.from_scale(GRAVE_STONE), p + Vector3(0, 0, -0.9))
 		stones.append(stone)
+		if stone_box.size != Vector3.ZERO:
+			var box := BoxShape3D.new()
+			box.size = stone_box.size * GRAVE_STONE
+			var cs := CollisionShape3D.new()
+			cs.shape = box
+			cs.transform = Transform3D(Basis(Vector3.UP, yaw), stone * stone_box.get_center())
+			body.add_child(cs)
 	_multimesh(NATURE + "RockPath_Square_Wide.gltf", slabs)
-	_multimesh(NATURE + "Pebble_Square_4.gltf", stones)
+	_multimesh(stone_path, stones)
 	print("cementerio: %d tumbas (las mismas que saca el juego)" % cells.size())
 
 
@@ -1121,7 +1010,9 @@ func _build_collision() -> void:
 	var n := 0
 	for x in mw:
 		for y in mh:
-			if MapBuilder.walkable(grid[x][y]):
+			# Los peñascos de cobertura ya chocan con su propia envolvente: una caja de 3 m sería
+			# una pared invisible alrededor de una roca de 2,6.
+			if MapBuilder.walkable(grid[x][y]) or _cover_cells.has(Vector2i(x, y)):
 				continue
 			var cs := CollisionShape3D.new()
 			cs.shape = box
@@ -1201,6 +1092,9 @@ func _multimesh(path: String, transforms: Array) -> void:
 		mmi.multimesh = mm
 		add_child(mmi)
 	_props += transforms.size()
+	# En headless el renderizador de relleno no guarda las transformadas del MultiMesh: las sondas
+	# (tests/rocks_probe.gd) leen de aquí dónde quedó cada copia.
+	(_placed.get_or_add(path, []) as Array).append_array(transforms)
 
 
 ## Quaternius guarda datos de viento en COLOR_0. Godot los interpreta como color de albedo
@@ -1390,6 +1284,145 @@ func _all_of_class(root: Node, cls: String, acc: Array) -> void:
 
 # ---------------------------------------------------------------- personajes y cámara
 
+## Tu leyenda y la cámara que la sigue. El cuerpo, el modelo y el estado de lanzador los crea el
+## combate (Fighter); aquí solo va lo que es TUYO: la cámara en tercera persona.
+func _spawn_player() -> void:
+	var c := _spawn_cell()
+	pf = combat.spawn_fighter(0, Fighter.TEAM_BLUE, true, _cell_pos(c.x, c.y) + Vector3(0, 0.2, 0))
+	pivot = Node3D.new()
+	add_child(pivot)
+	spring = SpringArm3D.new()
+	spring.spring_length = 5.0
+	spring.margin = 0.3
+	pivot.add_child(spring)
+	cam = Camera3D.new()
+	cam.fov = 70.0
+	cam.current = true
+	spring.add_child(cam)
+	_apply_cam_mode()
+
+
+## Cambia de leyenda en caliente (teclas 1-7, Tab, --legend).
+func set_legend(i: int) -> void:
+	combat.set_legend(pf, i)
+
+
+## ¿Hay partida por equipos? (la Horda no lo es)
+func is_pvp() -> bool:
+	return team_mode != null
+
+
+## Una leyenda ha caído. En la Horda solo cuenta para la racha (ya la pone a cero el combate);
+## por equipos, marcador, insignias y registro de bajas.
+func on_fighter_down(f: Fighter, by: Fighter) -> void:
+	if team_mode != null:
+		team_mode.on_fighter_down(f, by)
+
+
+## Gas nuevo para otra ronda: vuelve al borde del mapa, espera otra vez y sortea hacia dónde cierra.
+func reset_zone() -> void:
+	if _zone_wall == null:
+		return
+	_zone_t = 0.0
+	_zone_c = _zone_c0
+	_zone_r = _zone_r0
+	var margin := _zone_r0 - ZONE_MIN - 4.0
+	var a := rng.randf() * TAU
+	_zone_c1 = _zone_c0 + Vector3(cos(a), 0, sin(a)) * rng.randf() * maxf(margin, 0.0)
+	_apply_zone()
+
+
+## ¿Está el gas demoníaco en juego?
+func zone_active() -> bool:
+	return _zone_wall != null
+
+
+## Qué se juega: `--mode=` manda; si no, lo que eligió el menú (Engine "fl_mode", sobrevive a
+## recargar la escena); si no, en headless o con cualquier opción de prueba la Horda de siempre
+## (así las sondas y capturas no cambian); y si no, el menú de inicio.
+func _pick_mode() -> String:
+	if _args.has("mode"):
+		var m := String(_args["mode"])
+		return m if GameModes.MODES.has(m) or m == "menu" else "horda"
+	if Engine.has_meta("fl_mode"):
+		var chosen := String(Engine.get_meta("fl_mode"))
+		return chosen if GameModes.MODES.has(chosen) else "horda"
+	if DisplayServer.get_name() == "headless" or not _args.is_empty():
+		return "horda"
+	return "menu"
+
+
+## Menú de inicio sobre el mapa: tu leyenda escondida, la cámara dando vueltas alta y el menú encima.
+func _setup_menu() -> void:
+	if player_model != null:
+		player_model.visible = false
+	if pf.bar != null:
+		pf.bar.visible = false
+	if hud != null:
+		hud.visible = false
+	_cam_mode = 1
+	_apply_cam_mode()
+	spring.spring_length = 34.0
+	_pitch = -0.55
+	var layer := CanvasLayer.new()
+	layer.layer = 30
+	add_child(layer)
+	var menu := ModeMenu.new()
+	layer.add_child(menu)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+# Tu leyenda vista desde el control y el HUD táctil (touch_ui.gd lee estas).
+func _abil(i: int) -> Dictionary:
+	return pf.abil(i)
+
+
+func _ability_range(i: int) -> float:
+	return pf.ability_range(i)
+
+
+func _ability_radius(i: int) -> float:
+	return pf.ability_radius(i)
+
+
+func _ability_ready(i: int) -> bool:
+	return pf.ability_ready(i)
+
+
+func swap_ready(i: int) -> bool:
+	return combat.swap_ready(pf, i)
+
+
+func cooldown_left(i: int) -> float:
+	return pf.cooldown_left(i)
+
+
+func cooldown_fraction(i: int) -> float:
+	return pf.cooldown_fraction(i)
+
+
+func cooldown_text(i: int) -> String:
+	return pf.cooldown_text(i)
+
+
+func reset_abilities() -> void:
+	pf.reset_abilities()
+
+
+## Tu lanzamiento: intercambio con el señuelo si toca, y si no, al punto que marque la mira (ratón)
+## o al enemigo más cercano (toque sin arrastre).
+func _try_cast(i: int, at := Vector3.INF) -> void:
+	if combat.try_swap(pf, i):
+		return
+	if i == 0 and pf.ammo_max > 0 and pf.ammo <= 0 and team_mode != null:
+		team_mode.dry_fire()
+	if not pf.ability_ready(i):
+		return
+	if at == Vector3.INF:
+		at = _auto_aim(i) if touch else _aim_point(pf.ability_range(i))
+	combat.start_cast(pf, i, at)
+
+
 ## Celda de suelo de campo más cercana al centro del mapa.
 func _spawn_cell() -> Vector2i:
 	var best := Vector2i(mw / 2, mh / 2)
@@ -1403,57 +1436,6 @@ func _spawn_cell() -> Vector2i:
 				best_d = d
 				best = Vector2i(x, y)
 	return best
-
-
-func _spawn_player() -> void:
-	var c := _spawn_cell()
-	player = CharacterBody3D.new()
-	player.collision_layer = L_PLAYER
-	player.collision_mask = L_WORLD
-	player.position = _cell_pos(c.x, c.y) + Vector3(0, 0.2, 0)
-	var cs := CollisionShape3D.new()
-	var cap := CapsuleShape3D.new()
-	cap.radius = 0.45
-	cap.height = 1.8
-	cs.shape = cap
-	cs.position = Vector3(0, 0.9, 0)
-	player.add_child(cs)
-	# cuerpo base debajo del atuendo: los atuendos no traen cabeza (el peón salía sin cara)
-	var made := _make_character(LEGENDS[_legend]["models"])
-	player_model = made.get("node")
-	if player_model != null:
-		_tint_model(player_model, LEGENDS[_legend]["tint"])
-		var sc0 := float(LEGENDS[_legend].get("scale", 1.0))
-		if sc0 != 1.0:
-			player_model.scale = Vector3.ONE * sc0
-		_attach_weapon(player_model, String(LEGENDS[_legend].get("weapon", "")))
-	player_anims = made.get("anims", [])
-	player_anim = player_anims[0] if player_anims.size() > 0 else null
-	if player_model != null:
-		player.add_child(player_model)
-	torch = OmniLight3D.new()
-	torch.light_color = Color(1.0, 0.82, 0.55)
-	torch.omni_range = TORCH_RANGE
-	torch.light_energy = 0.0
-	torch.position = Vector3(0, 1.5, 0)
-	player.add_child(torch)
-	player_bar = _make_bar(player, _bar_height(player_model), BAR_ALLY)
-	add_child(player)
-	if player_anim != null:
-		_play_all(player_anims, "Idle")
-		player_anim.animation_finished.connect(_on_anim_done)
-
-	pivot = Node3D.new()
-	add_child(pivot)
-	spring = SpringArm3D.new()
-	spring.spring_length = 5.0
-	spring.margin = 0.3
-	pivot.add_child(spring)
-	cam = Camera3D.new()
-	cam.fov = 70.0
-	cam.current = true
-	spring.add_child(cam)
-	_apply_cam_mode()
 
 
 ## Tres compañeros de pie junto al jugador: es "la sala" del juego, pero en 3D.
@@ -1476,46 +1458,6 @@ func _tint_model(model: Node3D, c: Color) -> void:
 ## Rota entre las leyendas EN ROTACIÓN. Las retiradas quedan fuera; solo `set_legend` llega a ellas.
 func switch_legend(delta_i: int) -> void:
 	set_legend(wrapi(_legend + delta_i, 0, PLAYABLE))
-
-
-func set_legend(i: int) -> void:
-	_legend = clampi(i, 0, LEGENDS.size() - 1)
-	if player_model != null:
-		player.remove_child(player_model)
-		player_model.queue_free()
-	var made := _make_character(LEGENDS[_legend]["models"])
-	player_model = made.get("node")
-	player_anims = made.get("anims", [])
-	player_anim = player_anims[0] if player_anims.size() > 0 else null
-	if player_model != null:
-		_tint_model(player_model, LEGENDS[_legend]["tint"])
-		# El Cíclope es un duende a ×2,6: la escala va en el modelo, no en la cápsula, que se
-		# deja como está a propósito (el jugador solo choca con el mundo y agrandarla lo dejaría
-		# atascado entre los árboles).
-		var sc := float(LEGENDS[_legend].get("scale", 1.0))
-		if sc != 1.0:
-			player_model.scale = Vector3.ONE * sc
-		_attach_weapon(player_model, String(LEGENDS[_legend].get("weapon", "")))
-		player.add_child(player_model)
-	if player_anim != null:
-		_play_all(player_anims, "Idle")
-		if not player_anim.animation_finished.is_connected(_on_anim_done):
-			player_anim.animation_finished.connect(_on_anim_done)
-	_php = LEGENDS[_legend]["hp"]
-	# La antorcha y la barra cuelgan del jugador, que NO se recrea al cambiar de leyenda:
-	# solo hay que rehacerlas si por lo que sea faltan. La altura sí cambia con la leyenda.
-	if player_bar == null or not is_instance_valid(player_bar):
-		player_bar = _make_bar(player, 2.25, BAR_ALLY)
-	player_bar.position.y = _bar_height(player_model)
-	reset_abilities()
-	print("leyenda: %s (%d vida, %.1f m/s, %.2f m de alto, barra a %.2f)" % [
-		LEGENDS[_legend]["name"], int(_php), legend_speed(),
-		_model_top(player_model) * maxf(player_model.scale.y, 0.01) if player_model != null else 0.0,
-		player_bar.position.y if player_bar != null else 0.0])
-
-
-func legend_speed() -> float:
-	return float(LEGENDS[_legend]["speed"]) * PX
 
 
 func _spawn_companions() -> void:
@@ -1638,7 +1580,9 @@ func _button_at(p: Vector2) -> int:
 
 
 func _input(e: InputEvent) -> void:
-	if not touch:
+	if not touch or touch_ui == null:
+		return
+	if team_mode != null and team_mode.rules.state != "playing":
 		return
 	if e is InputEventScreenTouch:
 		var t := e as InputEventScreenTouch
@@ -1711,42 +1655,11 @@ func _release_aim() -> void:
 
 # ---------------------------------------------------------------- poderes
 
-func _ring(radius: float, color: Color, alpha := 0.9) -> MeshInstance3D:
-	var t := TorusMesh.new()
-	t.inner_radius = maxf(0.05, radius - 0.12)
-	t.outer_radius = radius
-	var mi := MeshInstance3D.new()
-	mi.mesh = t
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.albedo_color = Color(color.r, color.g, color.b, alpha)
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mi.material_override = m
-	return mi
-
-
-## Disco tenue para el relleno de una zona ya colocada (sin borde duro, como en el juego 2D).
-func _disc(radius: float, color: Color, alpha := 0.18) -> MeshInstance3D:
-	var c := CylinderMesh.new()
-	c.top_radius = radius
-	c.bottom_radius = radius
-	c.height = 0.04
-	var mi := MeshInstance3D.new()
-	mi.mesh = c
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.albedo_color = Color(color.r, color.g, color.b, alpha)
-	mi.material_override = m
-	return mi
-
-
 func _build_aim() -> void:
-	_aim_ring = _ring(5.0, SPARK, 0.55)
+	_aim_ring = vfx.ring(5.0, SPARK, 0.55)
 	_aim_ring.visible = false
 	add_child(_aim_ring)
-	_aim_dot = _ring(0.22, SPARK, 0.9)
+	_aim_dot = vfx.ring(0.22, SPARK, 0.9)
 	add_child(_aim_dot)
 
 
@@ -1783,117 +1696,10 @@ func _aim_point_touch(idx: int) -> Vector3:
 	return at
 
 
-## Color de una habilidad, tal cual viene de su .tres.
-func _acol(i: int) -> Color:
-	return _abil(i).get("col", SPARK)
-
-
-func _abil(i: int) -> Dictionary:
-	var list: Array = ABILITIES.get(LEGENDS[_legend]["id"], ABILITIES["tormentero"])
-	return list[i] if i < list.size() else list[0]
-
-
-func _ability_range(i: int) -> float:
-	var r := float(_abil(i).get("rng", 0.0)) * PX
-	return r if r > 0.1 else 2.5      # 0 = centrada en uno mismo
-
-
-func _ability_radius(i: int) -> float:
-	return float(_abil(i).get("rad", 24.0)) * PX
-
-
-func _ability_ready(i: int) -> bool:
-	if _php <= 0.0 or _windup >= 0.0:
-		return false
-	var ab := _abil(i)
-	if int(ab.get("chg", 0)) > 0:
-		return _chg[i] > 0
-	return _cd[i] <= 0.0
-
-
-## ¿Esta ranura está lista para INTERCAMBIAR en vez de lanzar? (player.swap_ready del juego)
-## Cuando lo está, el botón no enseña recarga: enseña que puedes cambiarte de sitio.
-func swap_ready(i: int) -> bool:
-	return _abil(i).get("swap", false) and _swap_t <= 0.0 and not _decoy_alive().is_empty()
-
-
-func cooldown_left(i: int) -> float:
-	var ab := _abil(i)
-	if int(ab.get("chg", 0)) > 0:
-		return _chg_t[i] if _chg[i] < int(ab["chg"]) else 0.0
-	return _cd[i]
-
-
-func cooldown_fraction(i: int) -> float:
-	var ab := _abil(i)
-	var total := float(ab.get("cd", 1.0))
-	if int(ab.get("chg", 0)) > 0:
-		return clampf(_chg_t[i] / total, 0.0, 1.0) if _chg[i] < int(ab["chg"]) else 0.0
-	return clampf(_cd[i] / total, 0.0, 1.0)
-
-
-## Rellena las cargas al cambiar de leyenda.
-func reset_abilities() -> void:
-	for i in 3:
-		_cd[i] = 0.0
-		_chg[i] = int(_abil(i).get("chg", 0))
-		_chg_t[i] = 0.0
-
-
-## Cobra la recarga o la carga y arranca el preaviso; el efecto sale al agotarse (player.try_cast).
-func _try_cast(i: int, at := Vector3.INF) -> void:
-	var ab := _abil(i)
-	if ab.get("swap", false) and _swap_t <= 0.0:
-		var al := _decoy_alive()
-		if not al.is_empty():
-			_swap_t = SWAP_COOLDOWN   # se salta la recarga, pero no es gratis
-			_swap_with_decoy(al)
-			return
-	if not _ability_ready(i):
-		return
-	if at == Vector3.INF:
-		at = _auto_aim(i) if touch else _aim_point(_ability_range(i))
-	var cd := float(ab["cd"])
-	if _cd_cap > 0.0:
-		cd = minf(cd, _cd_cap)     # --cd=N: solo para probar sin esperar la recarga real
-	if int(ab.get("chg", 0)) > 0:
-		_chg[i] -= 1
-		if _chg_t[i] <= 0.0:
-			_chg_t[i] = cd
-	else:
-		_cd[i] = cd
-	_windup = float(ab.get("cast", 0.25))
-	_windup_idx = i
-	_windup_at = at
-	# `adur` alarga SOLO la animación, no el preaviso: el lanzamiento de roca dura 1,33 s y
-	# comprimido a los 0,35 s del preaviso salía a 3,8x. El conjuro sale a su hora igual.
-	var dur := maxf(float(ab.get("adur", 0.0)), maxf(_windup, 0.35))
-	_cast_anim_t = dur
-	# Cada habilidad puede pedir su propia animación ("anim"): el mazazo del Cíclope y el
-	# terremoto del Guerrero usan un tajo corto, la roca OverhandThrow y la Retirada Roll.
-	# Si no la pide, o el modelo no la trae, se cae al reparto de siempre.
-	var anim: String = String(ab.get("anim", ""))
-	if anim == "" or player_anim == null or not player_anim.has_animation(anim):
-		anim = "Sword_Attack" if ab["k"] in ["melee", "dash"] else "Spell_Simple_Shoot"
-	_play_all(player_anims, anim)
-	if player_anim != null and player_anim.has_animation(anim):
-		var alen := player_anim.get_animation(anim).length
-		for ap in player_anims:
-			ap.speed_scale = alen / dur
-	if String(ab["k"]) != "decoy":
-		_hidden_t = 0.0              # disparar te delata; sacar más señuelos no
-		_spotted_t = SPOTTED_TIME    # y el camuflaje de la hierba tampoco aguanta un ataque
-	_sfx(String(ab.get("sfx", "proj_arcane")))
-	var face := at - player.global_position
-	face.y = 0.0
-	if face.length() > 0.1 and player_model != null:
-		player_model.rotation.y = atan2(face.x, face.z)
-
-
 ## Toque sin arrastre: al enemigo más cercano dentro del alcance; si no, al frente.
 func _auto_aim(i: int) -> Vector3:
 	var rng_m := _ability_range(i)
-	var near := _nearest_in(player.global_position, rng_m, 1)
+	var near := combat.foes_in(pf.team, player.global_position, rng_m, 1, true)
 	if not near.is_empty():
 		var p: Vector3 = near[0]["node"].global_position
 		p.y = 0.0
@@ -1902,797 +1708,12 @@ func _auto_aim(i: int) -> Vector3:
 	return player.global_position + f * rng_m * 0.7
 
 
-func _do_cast(i: int, at: Vector3) -> void:
-	var ab := _abil(i)
-	var rad := _ability_radius(i)
-	match String(ab["k"]):
-		"proj":
-			_cast_projectile(ab, at)
-		"melee":
-			_cast_melee(ab, at, rad)
-		"dash":
-			_cast_dash(ab, at, rad)
-		"heal":
-			_cast_heal(ab, rad)
-		"buff":
-			_cast_buff(ab)
-		"zone":
-			_cast_zone(ab, at, rad, true)
-		"gas":
-			_cast_zone(ab, at, rad, false)
-		"spores":
-			_cast_spores(ab, at, rad)
-		"trap":
-			_cast_trap(ab, at, rad, false)
-		"beacon":
-			_cast_beacon(ab, at, rad)
-		"spikes":
-			_cast_spikes(ab, at)
-		"summon":
-			_cast_summon(ab, at)
-		"decoy":
-			_cast_decoy(ab, at)
-
-
-# -- proyectil ------------------------------------------------------
-
-func _cast_projectile(ab: Dictionary, at: Vector3) -> void:
-	var col: Color = ab.get("col", SPARK)
-	var b := Node3D.new()
-	# Proyectil SÓLIDO (hoy solo el ancla): en vez de la bola de luz de siempre, el objeto que de
-	# verdad sale volando, girando y con la cadena tendida hasta la mano.
-	if String(ab.get("solid", "")) == "anchor":
-		_cast_anchor(ab, at, b, col)
-		return
-	var core := MeshInstance3D.new()
-	var sph := SphereMesh.new()
-	sph.radius = 0.20
-	sph.height = 0.40
-	sph.radial_segments = 10
-	sph.rings = 6
-	core.mesh = sph
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.albedo_color = Color(col.r + 0.25, col.g + 0.25, col.b + 0.25)
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	core.material_override = m
-	b.add_child(core)
-	# estela corta pegada a la bola, no una rociada en todas direcciones
-	var trail := _emitter(b, "spark_04", Color(col.r, col.g, col.b, 0.9), 0.12, 18, 0.28, 0.2, 0.45)
-	trail.position = Vector3.ZERO
-	b.position = player.global_position + Vector3(0, 1.2, 0)
-	add_child(b)
-	var l := OmniLight3D.new()
-	l.light_color = col
-	l.light_energy = 3.0
-	l.omni_range = 6.0
-	b.add_child(l)
-	bolts.append({"node": b, "target": _homing_target(at) if ab.get("homing", false) else null,
-		"to": at, "life": 3.0, "dmg": float(ab.get("dmg", 10.0)),
-		"stun": float(ab.get("stun", 0.0)), "pull": ab.get("pull", false),
-		"spd": float(ab.get("spd", 620.0)) * PX, "col": col,
-		"catch": float(ab.get("catch", 0.0)) * PX if ab.has("catch") else 1.2})
-
-
-## El ancla encadenada. Misma tubería que el resto de proyectiles (vive en `bolts`), pero con
-## malla propia, giro y cadena.
-func _cast_anchor(ab: Dictionary, at: Vector3, b: Node3D, col: Color) -> void:
-	b.add_child(_make_anchor())
-	b.position = player.global_position + Vector3(0, 1.3, 0)
-	add_child(b)
-	var l := OmniLight3D.new()      # un punto de luz tenue, para que de noche se siga con la vista
-	l.light_color = Color(1.0, 0.86, 0.6)
-	l.light_energy = 0.8
-	l.omni_range = 4.0
-	b.add_child(l)
-	var chain := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 0.035
-	cm.bottom_radius = 0.035
-	cm.height = 1.0
-	cm.radial_segments = 5
-	cm.rings = 1
-	chain.mesh = cm
-	var cmat := StandardMaterial3D.new()
-	cmat.albedo_color = Color(0.30, 0.28, 0.25)
-	cmat.roughness = 0.9
-	chain.material_override = cmat
-	add_child(chain)
-	bolts.append({"node": b, "target": _homing_target(at) if ab.get("homing", false) else null,
-		"to": at, "life": 4.0, "dmg": float(ab.get("dmg", 10.0)),
-		"stun": float(ab.get("stun", 0.0)), "pull": ab.get("pull", false),
-		"spd": float(ab.get("spd", 620.0)) * PX, "col": col, "chain": chain, "spin": true,
-		"catch": float(ab.get("catch", 60.0)) * PX})
-
-
-## La esfera es teledirigida: busca el enemigo más cercano al punto apuntado.
-func _homing_target(at: Vector3) -> CharacterBody3D:
-	var best: CharacterBody3D = null
-	var best_d := 4.0
-	for z in zombies:
-		if z["dead_t"] >= 0.0:
-			continue
-		var d: float = at.distance_to(z["node"].global_position)
-		if d < best_d:
-			best_d = d
-			best = z["node"]
-	return best
-
-
-func _tick_bolts(delta: float) -> void:
-	for i in range(bolts.size() - 1, -1, -1):
-		var b: Dictionary = bolts[i]
-		var node: Node3D = b["node"]
-		var goal: Vector3 = b["to"]
-		var tgt = b["target"]
-		if tgt != null and is_instance_valid(tgt):
-			goal = tgt.global_position + Vector3(0, 1.0, 0)
-		var to := goal - node.position
-		var step: float = float(b["spd"]) * delta
-		b["life"] -= delta
-		if to.length() <= step or b["life"] <= 0.0:
-			for z in _nearest_in(node.position, float(b.get("catch", 1.2)), 1):
-				_damage_zombie(z, float(b["dmg"]), float(b["stun"]))
-				if b["pull"]:
-					_pull(z, player.global_position)
-			var bc: Color = b.get("col", SPARK)
-			if b.get("spin", false):
-				# El ancla es hierro: al clavarse salta tierra, no chispas mágicas.
-				_burst("dirt_02", node.position, Color(0.66, 0.56, 0.40, 0.95), 18, 0.7, 3.0, 0.4, -4.0, 60.0, 0.3)
-				_burst("smoke_04", node.position, Color(0.78, 0.72, 0.60, 0.5), 10, 0.9, 1.2, 0.7, 0.2, 70.0, 0.4)
-			else:
-				_flash(node.position, Color(bc.r + 0.2, bc.g + 0.2, bc.b + 0.2), 1.4, 0.16)
-				_burst("spark_04", node.position, bc, 6, 0.22, 2.5, 0.3, -4.0, 35.0)
-			if b.get("chain") != null and is_instance_valid(b["chain"]):
-				(b["chain"] as Node).queue_free()
-			node.queue_free()
-			bolts.remove_at(i)
-			continue
-		node.position += to.normalized() * step
-		if b.get("spin", false):
-			node.rotate_object_local(Vector3.FORWARD, delta * 9.0)   # el ancla vuela girando
-		if b.get("chain") != null and is_instance_valid(b["chain"]):
-			_span(b["chain"], player.global_position + Vector3(0, 1.3, 0), node.position)
-
-
-## Arrastra al enemigo hacia un punto: es el empujón con el signo cambiado (Ability.pull).
-func _pull(z: Dictionary, to: Vector3) -> void:
-	var body: CharacterBody3D = z["node"]
-	var d := to - body.global_position
-	d.y = 0.0
-	var dist := d.length() - 0.9        # se queda a un brazo, no encima
-	if dist <= 0.1:
-		return
-	# Arrastre VISIBLE, no teletransporte: antes saltaba de golpe y encima con un tope de 6 m, así
-	# que desde el alcance máximo (8,3 m) ni siquiera llegaba a los pies. Ahora tira a velocidad
-	# fija y el tiempo sale de la distancia, o sea que llega venga de donde venga.
-	var secs := clampf(dist / PULL_SPEED, 0.12, 0.9)
-	_knock(z, d.normalized(), dist / secs, secs)
-	if _args.has("meleelog"):
-		print("[ENGANCHE] tira de un enemigo %.1f m en %.2f s" % [dist, secs])
-
-
-# -- cuerpo a cuerpo, carga, curación y mejora -----------------------
-
-func _cast_melee(ab: Dictionary, at: Vector3, rad: float) -> void:
-	# El giro cargado del Rompemareas: hasta x1,9 de radio y x2,1 de daño, y a 360 grados.
-	var full: bool = bool(ab.get("charge", false)) and _charge_mult > 1.02
-	rad *= lerpf(1.0, CHARGE_RAD, _charge_mult - 1.0) if full else 1.0
-	var origin := player.global_position
-	var face := at - origin
-	face.y = 0.0
-	if face.length() < 0.1:
-		face = Vector3(sin(player_model.rotation.y), 0, cos(player_model.rotation.y))
-	face = face.normalized()
-	var fx := _disc(rad, ab.get("col", Color(1, 0.9, 0.6)), 0.22)
-	fx.position = origin + face * rad * 0.5 + Vector3(0, 0.05, 0)
-	add_child(fx)
-	sparks.append({"node": fx, "life": 0.18})
-	_burst("slash_02", origin + face * rad * 0.6 + Vector3(0, 1.0, 0), Color(1, 0.95, 0.8),
-		4, 0.25, 1.0, rad * 0.9, 0.0, 20.0)
-	if bool(ab.get("dust", false)):
-		_swing_dust(origin, face, rad, full, float(ab.get("arc", MELEE_ARC)))
-	# Apertura del golpe, en grados de abanico total. El Mandoble de ancla barre 180°: todo lo que
-	# tenga delante, de hombro a hombro (petición del usuario). Cargado es la vuelta entera.
-	var half := deg_to_rad(float(ab.get("arc", MELEE_ARC))) * 0.5
-	var hits := 0
-	var widest := 0.0
-	for z in _nearest_in(origin, rad + 0.6):
-		var to: Vector3 = z["node"].global_position - origin
-		to.y = 0.0
-		var ang := face.angle_to(to.normalized()) if to.length() > 0.1 else 0.0
-		if not full and ang > half:
-			continue
-		widest = maxf(widest, ang)
-		hits += 1
-		_damage_zombie(z, float(ab.get("dmg", 20.0)) * (lerpf(1.0, CHARGE_DMG, _charge_mult - 1.0) if full else 1.0),
-			float(ab.get("stun", 0.0)))
-	if _args.has("meleelog"):
-		print("[GOLPE] %s: %.1f m de radio, abanico %.0f°%s, tocó a %d (el más abierto a %.0f°)" % [
-			ab["n"], rad, 360.0 if full else rad_to_deg(half * 2.0),
-			" CARGADO" if full else "", hits, rad_to_deg(widest)])
-
-
-## El ancla pesa: cada mandoble levanta el suelo (petición del usuario). El abanico de polvo sigue
-## al golpe — el cono de ~63° a cada lado en el mandoble normal, la vuelta entera si va cargado —
-## así que se ve DÓNDE ha pegado, que es justo lo que hace legible un área de golpe grande.
-func _swing_dust(origin: Vector3, face: Vector3, rad: float, full: bool, arc := MELEE_ARC,
-		amount := 1.0) -> void:
-	var span := TAU if full else deg_to_rad(arc)
-	var n := maxi(int(clampi(int(span / 0.42), 5, 11) * amount), 3)
-	var base_a := atan2(face.x, face.z)
-	for k in n:
-		var a: float = base_a + lerpf(-span * 0.5, span * 0.5, float(k) / float(n - 1))
-		var p := origin + Vector3(sin(a), 0.0, cos(a)) * rad * 0.75 + Vector3(0, 0.08, 0)
-		_burst("dirt_02", p, Color(0.72, 0.62, 0.45, 0.95), maxi(int(16 * amount), 4), 0.85, 3.0, 0.55, -3.2, 72.0, 0.4)
-		_burst("dirt_03", p, Color(0.58, 0.48, 0.34, 0.9), maxi(int(6 * amount), 2), 0.6, 3.6, 0.3, -5.0, 45.0, 0.25)
-	# Una polvareda baja que une el abanico, para que no se vean matas sueltas. Clara a propósito:
-	# sobre hierba verde un marrón oscuro no se lee.
-	_burst("smoke_04", origin + face * rad * (0.0 if full else 0.45) + Vector3(0, 0.15, 0),
-		Color(0.80, 0.74, 0.62, 0.62), maxi(int(28 * amount), 8), 1.3, 1.3, 1.15, 0.3, 78.0, rad * 0.6)
-
-
-## Empujón suave: el enemigo se desplaza y frena, en vez de teletransportarse.
-func _knock(z: Dictionary, dir: Vector3, force: float, secs := KNOCK_TIME) -> void:
-	z["knock"] = Vector3(dir.x, 0, dir.z).normalized() * force
-	z["knock_t"] = secs
-
-
-func _cast_dash(ab: Dictionary, at: Vector3, rad: float) -> void:
-	var d := at - player.global_position
-	d.y = 0.0
-	if d.length() < 0.3:
-		d = Vector3(sin(player_model.rotation.y), 0, cos(player_model.rotation.y))
-	# Retirada del Arquero: la única que se aleja del cursor en vez de ir hacia él. Va a alcance
-	# fijo, porque hacia atrás no hay nada que "señalar": d solo marca de qué te separas.
-	if bool(ab.get("back", false)):
-		d = -d.normalized() * float(ab.get("rng", 190.0)) * PX
-	# Llega justo donde señalaste, sin pasarse del alcance de la habilidad.
-	_dash_vec = d.normalized() * minf(d.length(), float(ab.get("rng", 700.0)) * PX)
-	_dash_total = _dash_vec.length()
-	_dash_done = 0.0
-	_dash_t = 0.0
-	_dash_dur = 1.0
-	var danim := String(ab.get("anim", "Sword_Attack"))
-	if player_anim == null or not player_anim.has_animation(danim):
-		danim = "Sword_Attack"
-	var alen := 1.0
-	if player_anim != null and player_anim.has_animation(danim):
-		alen = player_anim.get_animation(danim).length
-	# Dos maneras de cronometrar una carga:
-	#   "sync" (el Corte de hacha del Caballero, a petición del usuario) = el desplazamiento dura
-	#     lo que la animación, que va a velocidad normal; el golpe termina justo al llegar.
-	#   lo normal = manda la velocidad del juego (Ability.dash_speed) y la animación se adapta.
-	#     La Embestida son 4,6 m a 700 px/s: 0,31 s. Estirar ahí una animación de 1,1 s a la
-	#     inversa daría un paseo en vez de una carga.
-	var sp := 1.0
-	if bool(ab.get("sync", false)) or float(ab.get("spd", 0.0)) <= 0.0:
-		_dash_dur = alen
-	else:
-		_dash_dur = maxf(_dash_total / (float(ab["spd"]) * PX), 0.08)
-		sp = clampf(alen / _dash_dur, 0.5, 3.0)
-	if player_anim != null and player_anim.has_animation(danim):
-		_play_all(player_anims, danim)
-		for ap in player_anims:
-			ap.speed_scale = sp
-	_dash_left = _dash_dur
-	# La voltereta del Arquero dura más que su salto (0,17 s): el guardián de animación aguanta
-	# hasta que acaba, o se cortaría a medio giro.
-	_cast_anim_t = maxf(_dash_dur, alen / maxf(sp, 0.01))
-	_dash_dmg = float(ab.get("dmg", 20.0))
-	_dash_rad = rad
-	_dash_shove = float(ab.get("shove", 0.0))
-	_dash_hit.clear()
-	if _args.has("dashlog"):
-		_dash_from = player.global_position
-		_dash_want = _dash_vec.length()
-	_sfx("melee")
-
-
-func _cast_heal(ab: Dictionary, rad: float) -> void:
-	_php = minf(_php + float(ab.get("heal", 30.0)), float(LEGENDS[_legend]["hp"]))
-	var fx := _disc(rad, ab.get("col", Color(0.5, 1.0, 0.6)), 0.28)
-	fx.position = player.global_position + Vector3(0, 0.06, 0)
-	add_child(fx)
-	sparks.append({"node": fx, "life": 0.6})
-	_burst("star_06", player.global_position + Vector3(0, 0.4, 0), ab.get("col", Color(0.55, 1.0, 0.6)),
-		26, 1.1, 2.2, 0.55, 1.6, 30.0, rad * 0.5)
-
-
-func _cast_buff(ab: Dictionary) -> void:
-	_buff_left = float(ab.get("dur", 5.0))
-	_buff_resist = float(ab.get("resist", 0.3))
-	_buff_root = bool(ab.get("root", false))
-	_buff_dmg = float(ab.get("dmg", 0.0))
-	_buff_rad = float(ab.get("rng", 300.0)) * PX
-	_buff_tick = 0.0
-	var fx := _ring(_buff_rad, ab.get("col", Color(1.0, 0.8, 0.35)), 0.7)
-	fx.position = Vector3(0, 0.06, 0)
-	player.add_child(fx)
-	_buff_fx = fx
-
-
-# -- zonas, gas, trampas y balizas -----------------------------------
-
-## `burst` = golpe inicial tras el aviso (Tormenta). Sin él es solo una nube (Gas, Esporas).
-func _cast_zone(ab: Dictionary, at: Vector3, rad: float, burst: bool) -> void:
-	var col: Color = ab.get("col", SPARK)
-	var node := Node3D.new()
-	node.position = at
-	node.add_child(_ring(rad, col, 0.85))
-	node.add_child(_disc(rad, col, 0.12))
-	add_child(node)
-	if not burst:
-		_gas_cloud(node, rad, col)
-		# Estallido: la granada revienta con una bocanada gorda antes de asentarse la nube.
-		_burst("smoke_07", at + Vector3(0, 1.0, 0), Color(col.r, col.g, col.b, 0.9),
-			70, 1.8, 5.0, rad * 0.30, 0.15, 95.0, rad * 0.35)
-		_burst("smoke_02", at + Vector3(0, 0.4, 0), Color(col.r * 0.85, col.g, col.b * 0.6, 0.8),
-			55, 2.4, 2.5, rad * 0.24, 0.05, 95.0, rad * 0.55)
-	storms.append({"node": node, "delay": float(ab.get("delay", 0.0)) if burst else 0.0,
-		"field": float(ab.get("field", 6.0)), "tick": 0.0, "hit": not burst, "rad": rad,
-		"dmg": float(ab.get("dmg", 0.0)), "stun": float(ab.get("stun", 0.0)),
-		"fdmg": float(ab.get("fdmg", 8.0)), "fstun": float(ab.get("fstun", 0.0)),
-		"every": float(ab.get("tick", 2.0)), "slow": float(ab.get("slow", 0.0)),
-		"knock": float(ab.get("knock", 0.0)), "fx": String(ab.get("fx", "spark")),
-		"col": col, "bolts": 7 if burst else 0})
-
-
-## `beacon` = espera armada y al activarse suelta una nube en vez de descargar rayos.
-func _cast_trap(ab: Dictionary, at: Vector3, rad: float, beacon: bool) -> void:
-	var col: Color = ab.get("col", SPARK)
-	var node := Node3D.new()
-	node.position = at
-	node.add_child(_disc(rad, col, 0.10))
-	node.add_child(_ring(rad, col, 0.35))
-	var core := _disc(0.5, col, 0.8)
-	core.position = Vector3(0, 0.03, 0)
-	node.add_child(core)
-	add_child(node)
-	traps.append({"node": node, "armed": true, "left": float(ab.get("dur", 10.0)),
-		"tick": 0.0, "rad": rad, "dmg": float(ab.get("dmg", 12.0)),
-		"stun": float(ab.get("stun", 0.0)), "every": float(ab.get("tick", 2.0)),
-		"tgt": int(ab.get("tgt", 99)), "beacon": beacon, "slow": float(ab.get("slow", 0.0))})
-	var cap := int(ab.get("act", 5))
-	while traps.size() > cap:
-		var old: Dictionary = traps.pop_front()
-		old["node"].queue_free()
-
-
-## Barril de gas: bloquea el paso, tiene vida y espera dormido. Lo despierta un enemigo a 2 m
-## o cualquier golpe; entonces suelta la nube y se agota.
-func _cast_beacon(ab: Dictionary, at: Vector3, rad: float) -> void:
-	var body := StaticBody3D.new()
-	body.position = at + Vector3(0, 0.0, 0)
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.42
-	cyl.bottom_radius = 0.48
-	cyl.height = 1.25
-	var mi := MeshInstance3D.new()
-	mi.mesh = cyl
-	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(ab["col"]) * BEACON_TINT
-	m.emission_enabled = true
-	m.emission = Color(ab["col"]) * 0.35
-	m.roughness = 0.5
-	mi.material_override = m
-	mi.position = Vector3(0, 0.63, 0)
-	body.add_child(mi)
-	var cs := CollisionShape3D.new()
-	var shape := CylinderShape3D.new()
-	shape.radius = 0.45
-	shape.height = 1.3
-	cs.shape = shape
-	cs.position = Vector3(0, 0.65, 0)
-	body.add_child(cs)
-	add_child(body)
-	_emitter(body, "smoke_04", Color(ab["col"].r, ab["col"].g, ab["col"].b, 0.25), 0.3, 6, 1.4, 0.5, 0.5)
-	beacons.append({"node": body, "hp": BEACON_HP, "rad": rad, "dur": float(ab.get("dur", 10.0)),
-		"dmg": float(ab.get("dmg", 8.0)), "every": float(ab.get("tick", 0.5)),
-		"slow": float(ab.get("slow", 0.5)), "col": ab["col"], "spent": false})
-	var cap := int(ab.get("act", 5))
-	while beacons.size() > cap:
-		var old: Dictionary = beacons.pop_front()
-		old["node"].queue_free()
-
-
-## La baliza que tenga a mano un enemigo, para que la muela a golpes.
-func _beacon_in_reach(from: Vector3, r: float) -> Dictionary:
-	for bc in beacons:
-		if bc["spent"]:
-			continue
-		if from.distance_to((bc["node"] as Node3D).global_position) <= r:
-			return bc
-	return {}
-
-
-func _tick_beacons(delta: float) -> void:
-	for i in range(beacons.size() - 1, -1, -1):
-		var bc: Dictionary = beacons[i]
-		var node: Node3D = bc["node"]
-		if bc["spent"]:
-			continue
-		var near := not _nearest_in(node.global_position, BEACON_TRIGGER, 1).is_empty()
-		if near or float(bc["hp"]) <= 0.0:
-			bc["spent"] = true
-			_pop_beacon(bc)
-			node.queue_free()
-			beacons.remove_at(i)
-
-
-## Reventar la baliza: suelta la nube de gas donde estaba.
-func _pop_beacon(bc: Dictionary) -> void:
-	var at: Vector3 = (bc["node"] as Node3D).global_position
-	var col: Color = bc["col"]
-	_burst("smoke_07", at + Vector3(0, 0.8, 0), Color(col.r, col.g, col.b, 0.8), 26, 1.2, 3.0, 2.0, 0.2, 90.0)
-	_sfx("gas")
-	var node := Node3D.new()
-	node.position = at
-	node.add_child(_ring(float(bc["rad"]), col, 0.7))
-	node.add_child(_disc(float(bc["rad"]), col, 0.10))
-	add_child(node)
-	_gas_cloud(node, float(bc["rad"]), col)
-	storms.append({"node": node, "delay": 0.0, "field": float(bc["dur"]), "tick": 0.0, "hit": true,
-		"rad": float(bc["rad"]), "dmg": 0.0, "stun": 0.0, "fdmg": float(bc["dmg"]), "fstun": 0.0,
-		"every": float(bc["every"]), "slow": float(bc["slow"]), "bolts": 0})
-
-
-## Nube densa: tres capas de humo a distintas alturas y velocidades. Una sola capa se veía
-## rala y no tapaba nada.
-func _gas_cloud(node: Node3D, rad: float, col: Color) -> void:
-	# Muchas bocanadas MEDIANAS, no pocas gigantes: con partículas de 6 m la cámara se metía
-	# dentro de ellas y no se veía nada.
-	# En móvil, la mitad: son ~1.500 partículas por nube entre las tres capas.
-	var n := int(clampf(rad * (35.0 if touch else 70.0), 110.0, 700.0))
-	# Verde amarillento y bien opaco: sobre hierba verde, un verde apagado no se ve.
-	var tint := Color(0.72, 1.0, 0.25, 0.95)
-	var low := _emitter(node, "smoke_04", tint, rad * 0.92, n, 3.6, 0.14, rad * 0.40)
-	low.position = Vector3(0, 0.30, 0)
-	var mid := _emitter(node, "smoke_02", Color(tint.r, tint.g, tint.b, 0.80), rad * 0.80,
-		int(n * 0.7), 4.2, 0.30, rad * 0.32)
-	mid.position = Vector3(0, 1.00, 0)
-	var top := _emitter(node, "smoke_09", Color(tint.r * 0.9, tint.g, tint.b, 0.60), rad * 0.62,
-		int(n * 0.45), 4.8, 0.52, rad * 0.26)
-	top.position = Vector3(0, 1.80, 0)
-
-
-func _tick_traps(delta: float) -> void:
-	for i in range(traps.size() - 1, -1, -1):
-		var t: Dictionary = traps[i]
-		var node: Node3D = t["node"]
-		if t["armed"]:
-			if _nearest_in(node.position, float(t["rad"])).is_empty():
-				continue          # armada sin caducar, como en el juego
-			t["armed"] = false
-			t["tick"] = 0.0
-		t["left"] -= delta
-		t["tick"] -= delta
-		if t["tick"] <= 0.0:
-			t["tick"] = float(t["every"])
-			for z in _nearest_in(node.position, float(t["rad"]), int(t["tgt"])):
-				_damage_zombie(z, float(t["dmg"]), float(t["stun"]))
-				if float(t["slow"]) > 0.0:
-					z["slow_t"] = 2.0
-				if not t["beacon"]:
-					_spark(z["node"].global_position)
-		if t["left"] <= 0.0:
-			node.queue_free()
-			traps.remove_at(i)
-
-
-func _tick_storms(delta: float) -> void:
-	for i in range(storms.size() - 1, -1, -1):
-		var st: Dictionary = storms[i]
-		var node: Node3D = st["node"]
-		var rad := float(st["rad"])
-		if not st["hit"]:
-			st["delay"] -= delta
-			if st["delay"] <= 0.0:
-				st["hit"] = true
-				_zone_burst(st, node.position, rad)
-				for z in _nearest_in(node.position, rad):
-					_damage_zombie(z, float(st["dmg"]), float(st["stun"]))
-					if float(st["knock"]) > 0.0:
-						var away: Vector3 = (z["node"] as Node3D).global_position - node.position
-						away.y = 0.0
-						if away.length() < 0.05:
-							away = Vector3(1, 0, 0)
-						_knock(z, away.normalized(), float(st["knock"]))
-			continue
-		st["field"] -= delta
-		st["tick"] -= delta
-		if st["tick"] <= 0.0 and float(st["fdmg"]) > 0.0:
-			st["tick"] = float(st["every"])
-			for z in _nearest_in(node.position, rad):
-				_damage_zombie(z, float(st["fdmg"]), float(st["fstun"]))
-				if float(st["slow"]) > 0.0:
-					z["slow_t"] = 2.0
-					z["blind_t"] = 2.5     # dentro del humo no te ve: deambula
-		if st["field"] <= 0.0:
-			node.queue_free()
-			storms.remove_at(i)
-
-
-# -- muro de espinas -------------------------------------------------
-
-## Brota desde los pies hacia el punto apuntado; solo daña el tramo ya salido.
-func _cast_spikes(ab: Dictionary, at: Vector3) -> void:
-	var dir := at - player.global_position
-	dir.y = 0.0
-	if dir.length() < 0.3:
-		dir = Vector3(sin(player_model.rotation.y), 0, cos(player_model.rotation.y))
-	spikes.append({"from": player.global_position, "dir": dir.normalized(),
-		"len": _ability_range(2), "grown": 0.0, "left": float(ab.get("dur", 10.0)),
-		"tick": 0.0, "every": float(ab.get("tick", 1.0)), "rad": _ability_radius(2),
-		"dmg": float(ab.get("dmg", 20.0)), "stun": float(ab.get("stun", 2.0)), "nodes": []})
-
-
-## Mata de púas: tres conos inclinados que salen del suelo. Antes era un disco plano de 70 cm
-## sobre hierba verde y sencillamente no se veía.
-func _spike_clump(rad: float) -> Node3D:
-	var root := Node3D.new()
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.86, 0.87, 0.78)
-	mat.roughness = 0.6
-	var grow := clampf(rad / 0.72, 1.0, 3.0)       # 0,72 m era el radio original
-	for i in int(3 * grow):
-		var c := CylinderMesh.new()
-		c.top_radius = 0.0
-		c.bottom_radius = 0.13 * grow
-		c.height = rng.randf_range(1.0, 1.5) * grow
-		c.radial_segments = 6
-		var mi := MeshInstance3D.new()
-		mi.mesh = c
-		mi.material_override = mat
-		var a := TAU * i / float(maxi(1, int(3 * grow))) + rng.randf() * 0.7
-		mi.position = Vector3(cos(a), 0, sin(a)) * rad * rng.randf_range(0.15, 0.75) + Vector3(0, c.height * 0.45, 0)
-		mi.rotation = Vector3(rng.randf_range(-0.25, 0.25), a, rng.randf_range(-0.25, 0.25))
-		root.add_child(mi)
-	# marca oscura en el suelo, aplastada como las zonas del juego
-	var mark := _disc(rad, Color(0.25, 0.2, 0.12), 0.35)
-	mark.position = Vector3(0, 0.03, 0)
-	root.add_child(mark)
-	return root
-
-
-func _tick_spikes(delta: float) -> void:
-	for i in range(spikes.size() - 1, -1, -1):
-		var sp: Dictionary = spikes[i]
-		var full := float(sp["len"])
-		if sp["grown"] < full:
-			sp["grown"] = minf(full, float(sp["grown"]) + full * delta / 0.6)
-			while float(sp["nodes"].size()) * 1.1 < float(sp["grown"]):
-				var d := _spike_clump(float(sp["rad"]))
-				d.position = sp["from"] + sp["dir"] * (sp["nodes"].size() * 1.1) + Vector3(0, 0.0, 0)
-				add_child(d)
-				_burst("dirt_02", d.position, Color(0.75, 0.68, 0.5), 8, 0.5, 3.0, 0.5, -5.0)
-				sp["nodes"].append(d)
-		sp["left"] -= delta
-		sp["tick"] -= delta
-		if sp["tick"] <= 0.0:
-			sp["tick"] = float(sp["every"])
-			for n in sp["nodes"]:
-				for z in _nearest_in((n as Node3D).position, float(sp["rad"])):
-					_damage_zombie(z, float(sp["dmg"]), float(sp["stun"]))
-		if sp["left"] <= 0.0:
-			for n in sp["nodes"]:
-				(n as Node3D).queue_free()
-			spikes.remove_at(i)
-
-
-# -- esbirros y señuelos ---------------------------------------------
-
-func _cast_summon(ab: Dictionary, at: Vector3) -> void:
-	var n := int(ab.get("count", 1))
-	var rad := _ability_radius(1)
-	var base := at if float(ab.get("rng", 0.0)) > 0.0 else player.global_position
-	if n > 1:
-		# El ejército: antes de alzarlo caen todos los esqueletos salvo los 3 más recientes.
-		var mine: Array = []
-		for al in allies:
-			if al["kind"] == "minion":
-				mine.append(al)
-		while mine.size() > ARMY_KEEP:
-			var old: Dictionary = mine.pop_front()
-			old["hp"] = 0.0
-	for k in n:
-		var a := TAU * k / maxi(1, n)
-		_summon_queue.append(base + Vector3(cos(a), 0, sin(a)) * rad)
-
-
-func _tick_summon_queue(delta: float) -> void:
-	if _summon_queue.is_empty():
-		return
-	_summon_t -= delta
-	if _summon_t > 0.0:
-		return
-	_summon_t = 0.5                  # brotan de uno en uno, como en el juego
-	var mine := 0
-	for al in allies:
-		if al["kind"] == "minion":
-			mine += 1
-	if mine >= MINION_HARD_MAX:
-		_summon_queue.clear()
-		return
-	_spawn_ally("minion", _summon_queue.pop_front(), 0.0)
-
-
-func _cast_decoy(ab: Dictionary, at: Vector3) -> void:
-	var n := int(ab.get("n_decoys", 1))
-	var rad := _ability_radius(1)
-	var mode := int(ab.get("move", 1))
-	# Los giros saltan el 0 para que ningún clon quede pegado al jugador copiándole tal cual.
-	for k in n:
-		var a := TAU * (k + 1) / (n + 1)
-		var pos: Vector3
-		var dir := Vector3.ZERO
-		if mode == 2:                      # FORWARD: sale hacia donde apuntas y sigue de largo
-			dir = at - player.global_position
-			dir.y = 0.0
-			dir = dir.normalized() if dir.length() > 0.1 else Vector3(sin(player_model.rotation.y), 0, cos(player_model.rotation.y))
-			pos = player.global_position + dir * 1.2
-		else:                              # SPREAD: corro alrededor, cada uno mirando a un lado
-			pos = player.global_position + Vector3(cos(a), 0, sin(a)) * rad
-		_spawn_ally("decoy", pos, float(ab.get("dur", 20.0)), mode, a, dir)
-	if float(ab.get("invis", 0.0)) > 0.0:
-		_hidden_t = float(ab["invis"])
-
-
-## ¿Hay un señuelo suyo vivo para intercambiarse con él? (Ability.decoy_swap)
-func _decoy_alive() -> Dictionary:
-	for al in allies:
-		if al["kind"] == "decoy" and float(al["hp"]) > 0.0 \
-				and absf((al["node"] as Node3D).global_position.y) < 5.0:
-			return al
-	return {}
-
-
-## Intercambia sitio con el señuelo: tú apareces donde esté y él donde estabas tú.
-func _swap_with_decoy(al: Dictionary) -> void:
-	var body: CharacterBody3D = al["node"]
-	var mine := player.global_position
-	var to := body.global_position
-	var lim_x := mw * CELL * 0.5 - CELL
-	var lim_z := mh * CELL * 0.5 - CELL
-	to.x = clampf(to.x, -lim_x, lim_x)
-	to.z = clampf(to.z, -lim_z, lim_z)
-	to.y = maxf(to.y, 0.3)     # el suelo es un plano infinito que solo frena desde arriba:
-	player.global_position = to
-	_prev_ppos = to            # el salto NO es "paso": si no, los clones lo copian y se dispara
-	body.global_position = mine
-	_burst("magic_02", mine + Vector3(0, 0.9, 0), DECOY_TINT, 18, 0.5, 3.0, 0.6, 0.3)
-	_burst("magic_02", player.global_position + Vector3(0, 0.9, 0), DECOY_TINT, 18, 0.5, 3.0, 0.6, 0.3)
-	_sfx("decoy")
-
-
-## Un aliado: el esbirro pelea, el señuelo solo distrae. Los enemigos los toman por objetivo
-## cuando están más cerca que el jugador.
-func _spawn_ally(kind: String, pos: Vector3, life: float, mode := 1, turn := 0.0, dir := Vector3.ZERO) -> void:
-	var made: Dictionary
-	if kind == "decoy":
-		made = _make_character(LEGENDS[_legend]["models"])
-	else:
-		if _zombie_proto == null:
-			_proto_of(SPECIES[0])      # fuerza la carga del prototipo del esqueleto
-		made = _make_character([CHARS + "Skeleton_B.glb"], [[UAL1, ZOMBIE_ANIMS_1], [UAL2, ZOMBIE_ANIMS_2]])
-	var model: Node3D = made.get("node")
-	if model == null:
-		return
-	if kind == "decoy":
-		pass    # SIN tinte a propósito: si se distinguen, no confunden a nadie.
-	else:
-		_tint_model(model, Color(0.65, 1.0, 0.8))   # esbirro: verde pálido, para no confundirlo
-	var body := CharacterBody3D.new()
-	body.collision_layer = L_CREATURE
-	body.collision_mask = L_WORLD | L_CREATURE
-	body.position = pos + Vector3(0, 0.3, 0)
-	var cs := CollisionShape3D.new()
-	var cap := CapsuleShape3D.new()
-	cap.radius = 0.4
-	cap.height = 1.7
-	cs.shape = cap
-	cs.position = Vector3(0, 0.85, 0)
-	body.add_child(cs)
-	body.add_child(model)
-	add_child(body)
-	if kind == "decoy":
-		# Bocanada de humo en vez de estirarlos desde el suelo: así aparecen de golpe, del tamaño
-		# correcto, y el humo tapa el instante en que salen.
-		_burst("smoke_07", body.position + Vector3(0, 0.8, 0), Color(0.85, 0.85, 0.9, 0.7),
-			22, 1.0, 2.2, 1.6, 0.3, 80.0, 0.5)
-		_burst("smoke_04", body.position + Vector3(0, 0.4, 0), Color(0.8, 0.8, 0.85, 0.6),
-			14, 1.3, 1.2, 2.2, 0.1, 90.0, 0.7)
-	else:
-		_burst("magic_05", body.position + Vector3(0, 0.9, 0), Color(0.6, 1.0, 0.7), 20, 0.8, 3.0, 0.9, 1.0)
-	var anims := _anims_of(model)
-	_play_all(anims, "Idle" if kind == "decoy" else "Zombie_Walk_Fwd")
-	if kind == "decoy":
-		model.rotation.y = (player_model.rotation.y + turn) if mode == 1 else atan2(dir.x, dir.z)
-	var abar := _make_bar(body, 2.2, BAR_ALLY)
-	allies.append({"node": body, "anims": anims, "kind": kind, "bar": abar, "hpmax": 60.0, "hp": 60.0,
-		"life": life, "swing_t": 0.0, "mode": mode, "turn": turn, "dir": dir,
-		"spawn_t": 0.0, "model": model})
-
-
-func _tick_allies(delta: float) -> void:
-	for i in range(allies.size() - 1, -1, -1):
-		var al: Dictionary = allies[i]
-		var body: CharacterBody3D = al["node"]
-		if al["life"] > 0.0:
-			al["life"] -= delta
-		if al["hp"] <= 0.0 or (al["life"] < 0.0 and float(al["life"]) > -900.0):
-			body.queue_free()
-			allies.remove_at(i)
-			continue
-		if al["kind"] == "decoy":
-			_tick_decoy(al, body, delta)
-			continue
-		al["swing_t"] = maxf(0.0, float(al["swing_t"]) - delta)
-		var near := _nearest_in(body.global_position, 18.0, 1)
-		if near.is_empty():
-			continue
-		var tgt: CharacterBody3D = near[0]["node"]
-		var d := tgt.global_position - body.global_position
-		d.y = 0.0
-		if d.length() <= 2.0:
-			if al["swing_t"] <= 0.0:
-				al["swing_t"] = 1.4
-				_damage_zombie(near[0], 18.0)
-				_play_all(al["anims"], "Sword_Attack")
-		else:
-			body.velocity.x = d.normalized().x * 3.0
-			body.velocity.z = d.normalized().z * 3.0
-			var m := body.get_child(1) as Node3D
-			if m != null:
-				m.rotation.y = lerp_angle(m.rotation.y, atan2(d.x, d.z), 8.0 * delta)
-		body.velocity.y -= GRAVITY * delta
-		if body.is_on_floor() and body.velocity.y < 0.0:
-			body.velocity.y = -1.0
-		body.move_and_slide()
-
-
-## El señuelo NO te sigue: repite tu desplazamiento girado a su propia orientación (SPREAD),
-## o sale de largo hacia donde apuntaste (FORWARD). Así, si tú avanzas, cada clon avanza hacia
-## donde mira él; y si te paras, se paran todos.
-func _tick_decoy(al: Dictionary, body: CharacterBody3D, delta: float) -> void:
-	var model: Node3D = al["model"]
-	# Orientación: la del jugador MÁS su propio giro, recalculada cada frame. Antes se fijaba solo
-	# al nacer, así que al girar tú el clon seguía mirando a donde miraba al aparecer: corría bien
-	# pero de lado.
-	if int(al["mode"]) == 2:
-		model.rotation.y = atan2((al["dir"] as Vector3).x, (al["dir"] as Vector3).z)
-	elif player_model != null:
-		model.rotation.y = player_model.rotation.y + float(al["turn"])
-	var step := Vector3.ZERO
-	if int(al["mode"]) == 2:
-		step = (al["dir"] as Vector3) * legend_speed() * delta
-	else:
-		step = (_player_step as Vector3).rotated(Vector3.UP, float(al["turn"]))
-	step.y = 0.0
-	if step.length() > 0.0001:
-		body.move_and_collide(step)
-	body.velocity.y -= GRAVITY * delta
-	if body.is_on_floor() and body.velocity.y < 0.0:
-		body.velocity.y = -1.0
-	body.move_and_slide()
-	# 2. Gestos: el clon reproduce EXACTAMENTE lo que hace el jugador, incluido lanzar.
-	#    Es lo que de verdad confunde: si tú conjuras, los cinco conjuran.
-	if player_anim != null:
-		var cur := player_anim.current_animation
-		var anims: Array = al["anims"]
-		for ap in anims:
-			if cur != "" and ap.current_animation != cur and ap.has_animation(cur):
-				ap.play(cur)
-			ap.speed_scale = player_anim.speed_scale
-
-
 ## A quién persigue un enemigo: al aliado más cercano si lo tiene a tiro, si no al jugador.
 ## Devuelve el propio aliado (o null si es el jugador) para poder morderlo.
 func _enemy_prey(from: Vector3) -> Dictionary:
 	var best_d := from.distance_to(player.global_position) if not player_hidden() else 1e9
 	var prey: Dictionary = {}
-	for al in allies:
+	for al in combat.allies:
 		var d: float = from.distance_to((al["node"] as Node3D).global_position)
 		if d < best_d and d < 14.0:
 			best_d = d
@@ -2704,9 +1725,7 @@ func _enemy_prey(from: Vector3) -> Dictionary:
 ## una mancha de hierba alta. Atacar te delata unos segundos (`_spotted_t`), así que el camuflaje
 ## sirve para colarte o escapar, no para disparar desde la maleza sin consecuencias.
 func player_hidden() -> bool:
-	if _hidden_t > 0.0:
-		return true
-	return _crouch and _spotted_t <= 0.0 and in_tall_grass(player.global_position)
+	return combat.is_hidden(pf)
 
 
 ## ¿Este punto cae en una mancha de hierba alta?
@@ -2723,117 +1742,7 @@ func _enemy_target(from: Vector3) -> Vector3:
 		return (prey["node"] as Node3D).global_position
 	# Escondido: siguen yendo al último sitio donde te vieron, no a donde estás. Sin esto la
 	# invisibilidad no servía de nada cuando ibas solo: te seguían igual.
-	return _last_seen if player_hidden() else player.global_position
-
-
-## Daño a un aliado. Un solo golpe disipa un señuelo, como en el juego.
-func _hurt_ally(al: Dictionary, dmg: float) -> void:
-	if al["kind"] == "decoy":
-		al["hp"] = 0.0
-		var at: Vector3 = (al["node"] as Node3D).global_position + Vector3(0, 0.9, 0)
-		_burst("magic_02", at, DECOY_TINT, 22, 0.6, 3.5, 0.7, 0.4)
-	else:
-		al["hp"] = float(al["hp"]) - dmg
-
-
-# -- esporas ---------------------------------------------------------
-
-## Infecta al apuntado y a los que tenga cerca. A partir de ahí la plaga se mantiene sola:
-## contagia por cercanía, el daño crece con cada infectado y salta al morir uno.
-func _cast_spores(ab: Dictionary, at: Vector3, rad: float) -> void:
-	_spore_dps = SPORE_BASE
-	for z in _nearest_in(at, rad):
-		_infect(z)
-	_burst("magic_04", at + Vector3(0, 0.8, 0), SPORE_COL, 24, 0.9, 3.0, 0.8, 0.5, 70.0, rad * 0.5)
-
-
-## Los bultos: cuatro protuberancias pegadas al cuerpo, como pediste.
-## Solo infecta a criaturas: los señuelos y los esbirros NO cogen la plaga (petición del usuario;
-## además en `allies` no hay `dead_t`, así que entrar aquí con uno sería un error).
-func _infect(z: Dictionary) -> void:
-	if not z.has("dead_t") or z["dead_t"] >= 0.0 or float(z.get("spore_t", 0.0)) > 0.0:
-		return
-	if z.get("boss", false):
-		return                      # los jefes resisten la plaga, como en el juego
-	z["spore_t"] = SPORE_TIME
-	var body: Node3D = z["node"]
-	var lumps := Node3D.new()
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = SPORE_COL
-	mat.emission_enabled = true
-	mat.emission = SPORE_COL * 0.6
-	# A la medida del bicho: en un duende de 0,93 m los bultos del esqueleto le flotaban
-	# por encima de la cabeza.
-	var hs := float(z.get("cap", 1.7)) / 1.7
-	for i in 4:
-		var sph := SphereMesh.new()
-		var r := rng.randf_range(0.10, 0.20) * hs
-		sph.radius = r
-		sph.height = r * 2.0
-		sph.radial_segments = 6
-		sph.rings = 4
-		var mi := MeshInstance3D.new()
-		mi.mesh = sph
-		mi.material_override = mat
-		var a := TAU * i / 4.0 + rng.randf()
-		mi.position = Vector3(cos(a) * 0.22 * hs, rng.randf_range(0.5, 1.5) * hs, sin(a) * 0.22 * hs)
-		lumps.add_child(mi)
-	_emitter(lumps, "magic_03", Color(SPORE_COL.r, SPORE_COL.g, SPORE_COL.b, 0.5), 0.35, 8, 1.2, 0.35, 0.35)
-	body.add_child(lumps)
-	z["spore_fx"] = lumps
-
-
-func _cure(z: Dictionary) -> void:
-	z["spore_t"] = 0.0
-	if z.get("spore_fx") != null and is_instance_valid(z["spore_fx"]):
-		z["spore_fx"].queue_free()
-	z["spore_fx"] = null
-
-
-## Al morir un infectado los bultos revientan y la plaga salta a los de alrededor.
-func _spore_burst(z: Dictionary) -> void:
-	var at: Vector3 = (z["node"] as Node3D).global_position + Vector3(0, 0.9, 0)
-	_burst("magic_04", at, SPORE_COL, 30, 1.0, 5.0, 0.7, -1.0, 90.0, 0.3)
-	_flash(at, SPORE_COL, 1.6, 0.3)
-	_spore_dps = minf(_spore_dps * SPORE_KILL_MULT, SPORE_DPS_MAX)
-	var before := 0
-	for o in zombies:
-		if float(o.get("spore_t", 0.0)) > 0.0: before += 1
-	for other in _nearest_in(at, SPORE_SPREAD):
-		if other != z:
-			_infect(other)
-	if _args.has("sporelog"):
-		var after := 0
-		for o in zombies:
-			if float(o.get("spore_t", 0.0)) > 0.0: after += 1
-		print("[ESPORAS] estalla un infectado: %d -> %d contagiados, daño/s x1.25 = %.1f" % [before - 1, after, _spore_dps])
-	_cure(z)
-
-
-func _tick_spores(delta: float) -> void:
-	_spore_tick -= delta
-	var do_tick := _spore_tick <= 0.0
-	if do_tick:
-		_spore_tick = 1.0
-	var infected: Array = []
-	for z in zombies:
-		if z["dead_t"] >= 0.0 or float(z.get("spore_t", 0.0)) <= 0.0:
-			continue
-		z["spore_t"] = float(z["spore_t"]) - delta
-		if float(z["spore_t"]) <= 0.0:
-			_cure(z)
-			continue
-		infected.append(z)
-	if not do_tick or infected.is_empty():
-		return
-	_spore_dps = minf(_spore_dps + SPORE_GROWTH * mini(infected.size(), SPORE_MAX_TARGETS), SPORE_DPS_MAX)
-	if _args.has("sporelog"):
-		print("[ESPORAS] infectados=%d  daño/s=%.1f" % [infected.size(), _spore_dps])
-	for z in infected:
-		var at: Vector3 = (z["node"] as Node3D).global_position
-		for other in _nearest_in(at, SPORE_CONTAGION):
-			_infect(other)
-		_damage_zombie(z, _spore_dps)
+	return pf.last_seen if player_hidden() else player.global_position
 
 
 # -- ciclo día/noche -------------------------------------------------
@@ -2861,8 +1770,9 @@ func _tick_daylight(delta: float) -> void:
 	_day_t += delta
 	var n := _night_amount(_day_t)
 	sun.light_color = DAY_COLOR.lerp(NIGHT_COLOR, n)
-	if torch != null:
-		torch.light_energy = n * 2.2          # la antorcha se aviva al anochecer
+	for f: Fighter in combat.fighters:
+		if f.torch != null:
+			f.torch.light_energy = n * 2.2    # la antorcha se aviva al anochecer
 	sun.light_energy = lerpf(1.0, 0.30, n)
 	# Las brasas son para la noche: a pleno sol su luz no aportaba nada y teñía de naranja los
 	# huesos de todos los esqueletos del claro. Se actualizan por tramos, no cada fotograma.
@@ -2902,17 +1812,6 @@ func _model_top(model: Node3D) -> float:
 		var box: AABB = t * mi.get_aabb()
 		top = maxf(top, box.position.y + box.size.y)
 	return top
-
-
-## Dónde cuelga la barra de vida de una leyenda: justo encima de la cabeza (o del ancha, o del
-## mazo). `"bar"` en LEGENDS lo fuerza si alguna vez hace falta.
-func _bar_height(model: Node3D) -> float:
-	if LEGENDS[_legend].has("bar"):
-		return float(LEGENDS[_legend]["bar"])
-	if model == null:
-		return 2.25
-	var top := _model_top(model) * maxf(model.scale.y, 0.01)
-	return maxf(top, 1.2) + BAR_GAP
 
 
 ## Barra flotante: fondo oscuro + relleno que se encoge desde la izquierda. Sin prueba de
@@ -2961,170 +1860,11 @@ func _set_bar(bar: Node3D, frac: float, scale := 1.0) -> void:
 	fill.position.x = -w * 0.5 + w * f * 0.5
 
 
-# -- partículas (Kenney Particle Pack) -------------------------------
-
-## Material de partícula: cartel que siempre mira a cámara, sin iluminar, teñible.
-## Las texturas de Kenney son blancas, así que el color sale del `color` del emisor.
-func _fx_mat(tex: String) -> QuadMesh:
-	var key := "mesh:" + tex
-	if _fx_cache.has(key):
-		return _fx_cache[key]
-	var q := QuadMesh.new()
-	q.size = Vector2.ONE
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	# Aditivo para lo que brilla (chispas, magia, luz); mezcla normal para humo y tierra,
-	# que en aditivo se lavan a blanco y parecen vapor.
-	m.blend_mode = BaseMaterial3D.BLEND_MODE_MIX if tex.begins_with("smoke") or tex.begins_with("dirt") \
-		else BaseMaterial3D.BLEND_MODE_ADD
-	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
-	m.albedo_texture = load("res://assets/particles/%s.png" % tex)
-	m.vertex_color_use_as_albedo = true
-	m.disable_receive_shadows = true
-	q.material = m
-	_fx_cache[key] = q
-	return q
-
-
-## Estallido de una sola vez: se libera solo al terminar.
-func _burst(tex: String, pos: Vector3, color: Color, amount := 16, life := 0.6,
-		speed := 4.0, size := 0.6, grav := -2.0, spread := 60.0, from_radius := 0.1) -> void:
-	var p := CPUParticles3D.new()
-	p.mesh = _fx_mat(tex)
-	p.position = pos
-	p.amount = amount
-	p.lifetime = life
-	p.one_shot = true
-	p.explosiveness = 0.9
-	p.direction = Vector3.UP
-	p.spread = spread
-	p.initial_velocity_min = speed * 0.4
-	p.initial_velocity_max = speed
-	p.gravity = Vector3(0, grav, 0)
-	p.scale_amount_min = size * 0.6
-	p.scale_amount_max = size
-	p.color = color
-	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
-	p.emission_sphere_radius = from_radius
-	add_child(p)
-	sparks.append({"node": p, "life": life + 0.4})
-
-
-## Emisor continuo colgado de un nodo: la nube de gas, el aura de la mejora.
-func _emitter(parent: Node3D, tex: String, color: Color, radius: float,
-		amount := 40, life := 2.0, rise := 0.35, size := 2.0) -> CPUParticles3D:
-	var p := CPUParticles3D.new()
-	p.mesh = _fx_mat(tex)
-	p.amount = amount
-	p.lifetime = life
-	p.direction = Vector3.UP
-	p.spread = 25.0
-	p.initial_velocity_min = rise * 0.4
-	p.initial_velocity_max = rise
-	p.gravity = Vector3.ZERO
-	p.scale_amount_min = size * 0.6
-	p.scale_amount_max = size
-	p.color = color
-	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
-	p.emission_sphere_radius = radius
-	p.position = Vector3(0, 0.3, 0)
-	parent.add_child(p)
-	return p
-
-
-# -- efectos y utilidades --------------------------------------------
-
-## Fogonazo esférico que crece y se apaga. Lee como "aquí ha impactado algo".
-func _flash(at: Vector3, color: Color, size := 1.2, life := 0.18) -> void:
-	var mi := MeshInstance3D.new()
-	var sph := SphereMesh.new()
-	sph.radius = size * 0.5
-	sph.height = size
-	sph.radial_segments = 10
-	sph.rings = 6
-	mi.mesh = sph
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	m.albedo_color = color
-	mi.material_override = m
-	mi.position = at
-	add_child(mi)
-	var tw := create_tween()
-	tw.set_parallel(true)
-	tw.tween_property(mi, "scale", Vector3.ONE * 1.8, life)
-	tw.tween_property(m, "albedo_color:a", 0.0, life)
-	tw.chain().tween_callback(mi.queue_free)
-
-
-## Rayo: una línea QUEBRADA de arriba abajo. Antes era un cilindro recto, que no lee como rayo.
-func _spark(at: Vector3, col := Color(0.85, 0.92, 1.0)) -> void:
-	var root := Node3D.new()
-	add_child(root)
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	mat.albedo_color = Color(col.r, col.g, col.b, 1.0)
-	var top := 9.0
-	var segs := 7
-	var pts: Array[Vector3] = []
-	for i in segs + 1:
-		var t := float(i) / segs
-		var wob := (1.0 - absf(t - 0.5) * 1.6) * 0.55      # más quebrado por el centro
-		pts.append(at + Vector3(rng.randf_range(-wob, wob), top * (1.0 - t), rng.randf_range(-wob, wob)))
-	for i in segs:
-		var a: Vector3 = pts[i]
-		var b: Vector3 = pts[i + 1]
-		var d := b - a
-		var c := CylinderMesh.new()
-		c.top_radius = 0.05
-		c.bottom_radius = 0.05
-		c.height = d.length()
-		c.radial_segments = 4
-		var mi := MeshInstance3D.new()
-		mi.mesh = c
-		mi.material_override = mat
-		mi.transform = Transform3D(Basis(Quaternion(Vector3.UP, d.normalized())), a + d * 0.5)
-		root.add_child(mi)
-	sparks.append({"node": root, "life": 0.18})
-	_flash(at + Vector3(0, 0.3, 0), col, 1.6, 0.22)
-
-
-func _damage_zombie(z: Dictionary, dmg: float, stun := 0.0) -> void:
-	if z["dead_t"] >= 0.0:
-		return
-	z["hp"] -= dmg
-	z["bar_t"] = BAR_SHOW
-	if stun > 0.0:
-		z["stun_t"] = maxf(z.get("stun_t", 0.0), stun * (0.35 if z.get("boss", false) else 1.0))
-	if z["hp"] <= 0.0:
-		_kill_zombie(z)
-
-
-## Los `n` enemigos vivos más cercanos a un punto dentro de un radio.
-func _nearest_in(at: Vector3, radius: float, n := 999) -> Array:
-	var found: Array = []
-	for z in zombies:
-		if z["dead_t"] >= 0.0:
-			continue
-		var d: float = at.distance_to(z["node"].global_position)
-		if d <= radius:
-			found.append({"z": z, "d": d})
-	found.sort_custom(func(a, b): return a["d"] < b["d"])
-	var out: Array = []
-	for i in mini(n, found.size()):
-		out.append(found[i]["z"])
-	return out
-
-
 ## Solo para pruebas headless: lanza lo que esté listo hacia el enemigo más cercano.
 func _auto_cast() -> void:
-	if _dash_left > 0.0:
+	if pf.dash_left > 0.0:
 		return              # durante la embestida no se lanza nada (si no, pisa su animación)
-	var near := _nearest_in(player.global_position, 30.0, 1)
+	var near := combat.foes_in(pf.team, player.global_position, 30.0, 1, true)
 	if near.is_empty() or player_model == null:
 		return
 	var to: Vector3 = near[0]["node"].global_position - player.global_position
@@ -3136,131 +1876,6 @@ func _auto_cast() -> void:
 			var at := player.global_position + to.normalized() * minf(to.length(), _ability_range(idx))
 			_try_cast(idx, at)
 			return
-
-
-func _tick_powers(delta: float) -> void:
-	_player_step = player.global_position - _prev_ppos
-	_player_step.y = 0.0
-	if _player_step.length() > 1.0:
-		_player_step = Vector3.ZERO   # eso no es andar, es un teletransporte
-	_prev_ppos = player.global_position
-	_hidden_t = maxf(0.0, _hidden_t - delta)
-	_spotted_t = maxf(0.0, _spotted_t - delta)
-	if not player_hidden():
-		_last_seen = player.global_position
-	_swap_t = maxf(0.0, _swap_t - delta)
-	# Red de seguridad: nada debería caerse del mundo, pero si pasa, se recupera en vez de
-	# quedarse cayendo eternamente (el suelo es un plano infinito y no frena desde abajo).
-	# Tope duro cada frame. Da igual qué lo empuje (depenetración de un muro, un intercambio,
-	# gravedad acumulada): el jugador NO sale del mundo. Antes acababa a 1 km de altura.
-	var lx := mw * CELL * 0.5 - CELL
-	var lz := mh * CELL * 0.5 - CELL
-	var p := player.global_position
-	var fixed := Vector3(clampf(p.x, -lx, lx), clampf(p.y, 0.2, 25.0), clampf(p.z, -lz, lz))
-	if not fixed.is_equal_approx(p):
-		player.global_position = fixed
-		player.velocity.y = 0.0
-		_prev_ppos = fixed
-	for al in allies:
-		var ab_node: Node3D = al["node"]
-		if ab_node.global_position.y < -5.0:
-			al["hp"] = 0.0
-	# Mantener la básica carga el mandoble (solo la leyenda que lo tiene).
-	var holding := (_aim_btn == 0) or (not touch and Input.is_physical_key_pressed(KEY_Q))
-	if _abil(0).get("charge", false) and holding and _php > 0.0:
-		_swing_charge_t = minf(_swing_charge_t + delta, CHARGE_MAX)
-	elif _swing_charge_t > 0.0 and not holding:
-		_swing_charge_t = 0.0
-	_charge_mult = 1.0
-	if _swing_charge_t >= CHARGE_MIN:
-		_charge_mult = 1.0 + (_swing_charge_t - CHARGE_MIN) / (CHARGE_MAX - CHARGE_MIN)
-	for i in 3:
-		_cd[i] = maxf(0.0, _cd[i] - delta)
-		var ab := _abil(i)
-		var maxc := int(ab.get("chg", 0))
-		if maxc > 0 and _chg[i] < maxc:
-			_chg_t[i] -= delta
-			if _chg_t[i] <= 0.0:
-				_chg[i] += 1
-				_chg_t[i] = float(ab["cd"]) if _chg[i] < maxc else 0.0
-
-	if _windup >= 0.0:
-		_windup -= delta
-		if _windup <= 0.0:
-			_windup = -1.0
-			_do_cast(_windup_idx, _windup_at)
-			_windup_idx = -1
-
-	_tick_buff(delta)
-	_tick_dash(delta)
-	_tick_guard(delta)
-	_tick_daylight(delta)
-	_tick_bars(delta)
-
-	var prev_r := _ability_range(_preview) if _preview >= 0 else 6.0
-	var aim := _aim_point(prev_r)
-	if touch and _aim_btn >= 0:
-		aim = _aim_point_touch(_preview)
-	_aim_dot.position = aim + Vector3(0, 0.05, 0)
-	_aim_ring.visible = _preview >= 1
-	if _preview >= 1:
-		_aim_ring.position = aim + Vector3(0, 0.05, 0)
-		var r := _ability_radius(_preview)
-		var t := _aim_ring.mesh as TorusMesh
-		t.outer_radius = r
-		t.inner_radius = maxf(0.05, r - 0.12)
-
-	if _args.has("autocast"):
-		_auto_cast()
-
-	_tick_bolts(delta)
-	_tick_traps(delta)
-	_tick_beacons(delta)
-	_tick_storms(delta)
-	_tick_spikes(delta)
-	_tick_spores(delta)
-	_tick_summon_queue(delta)
-	_tick_allies(delta)
-	for i in range(sparks.size() - 1, -1, -1):
-		sparks[i]["life"] -= delta
-		if sparks[i]["life"] <= 0.0:
-			sparks[i]["node"].queue_free()
-			sparks.remove_at(i)
-
-
-## Refresca todas las barras: verdes los tuyos, rojas las criaturas.
-func _tick_bars(delta: float) -> void:
-	_set_bar(player_bar, _php / maxf(float(LEGENDS[_legend]["hp"]), 1.0))
-	for z in zombies:
-		if z.has("bar"):
-			# La escala tiene que ser la MISMA con la que se creó la barra: _set_bar la usa para
-			# recolocar el relleno, y con el duende (0,7) o el licántropo (1,2) quedaba descentrado.
-			_set_bar(z["bar"], float(z["hp"]) / maxf(float(z.get("hpmax", ZOMBIE_HP)), 1.0),
-				float(z.get("bscale", 1.0)))
-			_tick_enemy_bar(z, delta)
-	for al in allies:
-		if al.has("bar"):
-			_set_bar(al["bar"], float(al["hp"]) / maxf(float(al.get("hpmax", 60.0)), 1.0))
-
-
-## La vida de una criatura solo se ve cuando la golpeas, y se va sola (petición del usuario): con
-## 40 bichos a la vez el claro era una pared de barras rojas y no se veía la pelea. El jefe es la
-## excepción: su barra es el objetivo de la oleada y no se esconde.
-func _tick_enemy_bar(z: Dictionary, delta: float) -> void:
-	var bar: Node3D = z["bar"]
-	if bar == null or not is_instance_valid(bar):
-		return
-	if z.get("boss", false):
-		return
-	var t := float(z.get("bar_t", 0.0))
-	if t <= 0.0:
-		if bar.visible:
-			bar.visible = false
-		return
-	t = maxf(t - delta, 0.0)
-	z["bar_t"] = t
-	bar.visible = t > 0.0
-	_fade_bar(bar, clampf(t / BAR_FADE, 0.0, 1.0))
 
 
 ## Alfa de las dos capas de la barra. El fondo va más tenue que el relleno, como al crearla.
@@ -3276,157 +1891,11 @@ func _fade_bar(bar: Node3D, a: float) -> void:
 		m.albedo_color = Color(c.r, c.g, c.b, (0.75 if mi.name != "Fill" else 1.0) * a)
 
 
-## Guardia automática del Caballero: se cubre solo tras estar quieto, y atacar NO la rompe.
-## La rompen moverse, cargar o que te aturdan.
-func _tick_guard(delta: float) -> void:
-	if not LEGENDS[_legend].get("guard", false) or _php <= 0.0:
-		_guard = false
-		_still_t = 0.0
-	else:
-		var moving := _player_step.length() > 0.02 or _dash_left > 0.0
-		if moving:
-			_still_t = 0.0
-			_guard = false
-		else:
-			_still_t += delta
-			_guard = _still_t >= GUARD_DELAY
-	if _guard and _guard_fx == null:
-		_guard_fx = _bubble(1.05, GUARD_COL)
-		_guard_fx.position = Vector3(0, 0.95, 0)
-		player.add_child(_guard_fx)
-	elif not _guard and _guard_fx != null:
-		_guard_fx.queue_free()
-		_guard_fx = null
-	if _guard_fx != null:
-		var pulse := 1.0 + sin(float(Time.get_ticks_msec()) * 0.004) * 0.045
-		_guard_fx.scale = Vector3(pulse, pulse, pulse)
-
-
-## Burbuja de guardia. El aro en el suelo era otro círculo blanco de los que el juego ya quitó
-## (CLAUDE.md, "marcas en el suelo"), y encima el esqueleto no lleva escudo que levantar. Esta es
-## la misma idea que la burbuja de inmunidad del 2D, pero en 3D una esfera translúcida a secas se
-## ve como un disco plano que tapa el fondo: el brillo va por FRESNEL, así que enciende el borde
-## y deja el centro casi transparente, que es lo que la lee como cascarón y no como mancha.
-func _bubble(radius: float, color: Color) -> MeshInstance3D:
-	var sph := SphereMesh.new()
-	sph.radius = radius
-	sph.height = radius * 2.0
-	sph.radial_segments = 24
-	sph.rings = 12
-	var mi := MeshInstance3D.new()
-	mi.mesh = sph
-	var sh: Shader = _bubble_sh
-	if sh == null:
-		sh = Shader.new()
-		_bubble_sh = sh
-		sh.code = """
-shader_type spatial;
-render_mode blend_add, cull_disabled, unshaded, depth_draw_never, shadows_disabled;
-uniform vec4 col : source_color;
-uniform float power = 3.0;
-void fragment() {
-	float f = pow(1.0 - abs(dot(normalize(NORMAL), normalize(VIEW))), power);
-	ALBEDO = col.rgb;
-	ALPHA = col.a * f;
-}
-"""
-	var m := ShaderMaterial.new()
-	m.shader = sh
-	m.set_shader_parameter("col", Color(color.r, color.g, color.b, 0.62))
-	m.set_shader_parameter("power", 3.4)
-	mi.material_override = m
-	return mi
-
-
-func _tick_buff(delta: float) -> void:
-	if _buff_left <= 0.0:
-		return
-	_buff_left -= delta
-	_buff_tick -= delta
-	if _buff_tick <= 0.0:
-		_buff_tick = 0.8
-		# El aura del Ancla clavada es otro golpe suyo y también levanta polvo, pero a la mitad:
-		# repite cada 0,8 s y con la carga del mandoble entero la nube no se despejaba nunca.
-		_swing_dust(player.global_position, Vector3(0, 0, 1), _buff_rad, true, MELEE_ARC, 0.45)
-		for z in _nearest_in(player.global_position, _buff_rad):
-			_damage_zombie(z, _buff_dmg)
-			_pull(z, player.global_position)
-	if _buff_left <= 0.0 and _buff_fx != null:
-		_buff_fx.queue_free()
-		_buff_fx = null
-
-
-## Distancia de un punto al segmento recorrido este frame. Sin esto, un tajo a 17 m/s
-## deja entre frame y frame huecos de más de medio metro y se salta enemigos.
-func _seg_dist(p: Vector3, a: Vector3, b: Vector3) -> float:
-	var ab := b - a
-	var l2 := ab.length_squared()
-	if l2 < 0.0001:
-		return p.distance_to(a)
-	var t := clampf((p - a).dot(ab) / l2, 0.0, 1.0)
-	return p.distance_to(a + ab * t)
-
-
-func _tick_dash(delta: float) -> void:
-	if _dash_left <= 0.0:
-		return
-	if player_model != null and _dash_vec.length() > 0.01:
-		player_model.rotation.y = atan2(_dash_vec.x, _dash_vec.z)
-	# Avanza según lo que lleva de animación, con arranque suave: llega exactamente al acabar.
-	_dash_t = minf(_dash_t + delta, _dash_dur)
-	var f := smoothstep(0.0, 1.0, _dash_t / _dash_dur)
-	var want := _dash_total * f
-	var len_step := maxf(want - _dash_done, 0.0)
-	_dash_done = want
-	var step := _dash_vec.normalized() * len_step
-	var from := player.global_position
-	_dash_left -= delta
-	if _dash_t >= _dash_dur:
-		_dash_left = 0.0
-		if _args.has("dashlog"):
-			var enemigos := 0
-			for z in _nearest_in(_dash_from.lerp(player.global_position, 0.5), _dash_total):
-				if _seg_dist((z["node"] as Node3D).global_position, _dash_from, player.global_position) <= _dash_rad:
-					enemigos += 1
-			print("[EMBESTIDA] quería %.1f m, recorrió %.1f m en %.2f s (animación %.2f s), arrolló %d de %d" % [
-				_dash_total, _dash_from.distance_to(player.global_position),
-				_dash_t, _dash_dur, _dash_hit.size(), enemigos])
-	if _dash_left <= 0.0 and player_anim != null and _cast_anim_t <= 0.0:
-		for ap in player_anims:
-			ap.speed_scale = 1.0
-	player.velocity = Vector3.ZERO
-	player.move_and_collide(step)
-	# Humo continuo a los pies: es lo que hace que no parezca que se desliza.
-	_burst("smoke_04", player.global_position + Vector3(0, 0.12, 0),
-		Color(0.82, 0.80, 0.72, 0.75), 5, 0.65, 1.1, 0.85, 0.1, 75.0, 0.35)
-	_burst("dirt_01", player.global_position + Vector3(0, 0.15, 0),
-		Color(0.78, 0.72, 0.58), 5, 0.5, 2.2, 0.45, -3.0, 50.0)
-	var fwd := _dash_vec.normalized()
-	var perp := fwd.cross(Vector3.UP).normalized()
-	var to := player.global_position
-	for z in _nearest_in(from.lerp(to, 0.5), from.distance_to(to) * 0.5 + _dash_rad):
-		if _dash_hit.has(z["node"]):
-			continue
-		if _seg_dist((z["node"] as Node3D).global_position, from, to) > _dash_rad:
-			continue
-		_dash_hit[z["node"]] = true
-		_damage_zombie(z, _dash_dmg)
-		if _dash_shove > 0.0:
-			# A un lado o a otro según de qué lado del corte esté: se abre en dos.
-			var off: Vector3 = (z["node"] as Node3D).global_position - player.global_position
-			var side := signf(off.dot(perp))
-			if absf(side) < 0.01:
-				side = 1.0 if rng.randf() < 0.5 else -1.0
-			_knock(z, perp * side, _dash_shove)
-		_burst("slash_03", (z["node"] as Node3D).global_position + Vector3(0, 1.0, 0),
-			Color(1, 0.9, 0.85), 3, 0.2, 1.0, 1.4, 0.0, 15.0)
-
-
 # ---------------------------------------------------------------- horda
 
 func _setup_horde() -> void:
-	_spawn_cells = MapBuilder.edge_cells(grid)
-	_grave_cells = MapBuilder.cemetery_graves(grid, zones, MAP_SEED)
+	_spawn_cells = MapBuilder.edge_cells(_mb_grid)
+	_grave_cells = MapBuilder.cemetery_graves(_mb_grid, _mb_zones, MAP_SEED)
 	_rebuild_flow(_cell_of(player.global_position))
 	_wave = int(_args.get("wave", "2" if touch else "1")) - 1
 	if touch and not _args.has("near"):
@@ -3483,7 +1952,7 @@ func _spawn_boss() -> void:
 	_play_all(anims, "Zombie_Walk_Fwd")
 	_add_eyes(model, Color(1.0, 0.25, 0.08))
 	var bbar := _make_bar(body, 3.4, BAR_ENEMY, 2.2)
-	zombies.append({"node": body, "anims": anims, "bar": bbar,
+	zombies.append({"node": body, "kind": "zombie", "team": Fighter.TEAM_HORDE, "anims": anims, "bar": bbar,
 		"hpmax": ZOMBIE_HP * BOSS_HP_MULT, "hp": ZOMBIE_HP * BOSS_HP_MULT,
 		"swing_t": 0.0, "dead_t": -1.0, "stun_t": 0.0, "boss": true, "bscale": 2.2})
 	_boss_alive = true
@@ -3551,8 +2020,11 @@ func _spawn_zombie(at := Vector3.INF) -> void:
 	var body := CharacterBody3D.new()
 	body.collision_layer = L_CREATURE
 	body.collision_mask = L_WORLD | L_CREATURE
-	body.position = at + Vector3(0, 0.2, 0) if placed else \
-		_cell_pos(c.x, c.y) + Vector3(rng.randf_range(-0.8, 0.8), 0.2, rng.randf_range(-0.8, 0.8))
+	# De una tumba brota sobre la losa, delante de la lápida (que está a -0,9 y ahora choca): con el
+	# reparto de ±0,8 de siempre algunas nacían dentro de la piedra.
+	var jitter := Vector3(rng.randf_range(-0.6, 0.6), 0.2, rng.randf_range(0.1, 1.1)) if from_grave \
+		else Vector3(rng.randf_range(-0.8, 0.8), 0.2, rng.randf_range(-0.8, 0.8))
+	body.position = at + Vector3(0, 0.2, 0) if placed else _cell_pos(c.x, c.y) + jitter
 	var cs := CollisionShape3D.new()
 	var cap := CapsuleShape3D.new()
 	cap.radius = float(sp["rad"])
@@ -3569,7 +2041,7 @@ func _spawn_zombie(at := Vector3.INF) -> void:
 	var bar := _make_bar(body, float(sp["bar"]), BAR_ENEMY, float(sp["bscale"]))
 	bar.visible = false        # solo se asoma al recibir un golpe (petición del usuario)
 	var hpmax := ZOMBIE_HP * float(sp["hp"])
-	zombies.append({"node": body, "anims": anims, "bar": bar, "hpmax": hpmax, "hp": hpmax,
+	zombies.append({"node": body, "kind": "zombie", "team": Fighter.TEAM_HORDE, "anims": anims, "bar": bar, "hpmax": hpmax, "hp": hpmax,
 		"swing_t": 0.0, "dead_t": -1.0, "stun_t": 0.0, "sp": sp["id"],
 		"spd": float(sp["spd"]), "dmg": float(sp["dmg"]), "reach": float(sp["reach"]),
 		"bscale": float(sp["bscale"]), "cap": float(sp["cap"])})
@@ -3611,7 +2083,6 @@ func _proto_of(sp: Dictionary) -> Node3D:
 	if id == "esqueleto":
 		_zombie_proto = n
 	return n
-
 
 
 ## Tinte verdoso por override de superficie: si se tocara el material de la malla se teñiría
@@ -3761,22 +2232,6 @@ func _make_anchor() -> Node3D:
 	return root
 
 
-## Estira un cilindro de altura 1 para que vaya de `a` a `b`. Es como se dibuja la cadena, que
-## cambia de largo cada fotograma mientras el ancla vuela.
-func _span(mi: MeshInstance3D, a: Vector3, b: Vector3) -> void:
-	var dir := b - a
-	var len := dir.length()
-	if len < 0.01:
-		mi.visible = false
-		return
-	mi.visible = true
-	var y := dir / len
-	var ref := Vector3.RIGHT if absf(y.dot(Vector3.RIGHT)) < 0.9 else Vector3.FORWARD
-	var x := ref.cross(y).normalized()
-	var z := x.cross(y).normalized()
-	mi.transform = Transform3D(Basis(x * 1.0, y * len, z * 1.0), (a + b) * 0.5)
-
-
 ## Cuelga un arma del hueso de la mano. El pack de atuendos de Quaternius trae 24 piezas de ropa
 ## y NINGUN arma (el juego 2D lo tiene anotado igual), así que todo lo que lleven en la mano las
 ## leyendas humanas hay que construirlo. El arco va en la izquierda, que es la que lo sujeta;
@@ -3855,22 +2310,6 @@ func _add_eyes(model: Node3D, col := EYE_COL, sc := 1.0) -> void:
 	att.add_child(l)
 
 
-func _tint_zombie(model: Node3D) -> void:
-	for entry in _meshes_of(model):
-		var mi: MeshInstance3D = entry["node"]
-		var mesh: Mesh = entry["mesh"]
-		for i in mesh.get_surface_count():
-			var base := mesh.surface_get_material(i)
-			if not (base is BaseMaterial3D):
-				continue
-			var key := "%s#%d" % [base.resource_name, i]
-			if not _zombie_mats.has(key):
-				var dup := (base as BaseMaterial3D).duplicate() as BaseMaterial3D
-				dup.albedo_color = dup.albedo_color * ZOMBIE_TINT
-				_zombie_mats[key] = dup
-			mi.set_surface_override_material(i, _zombie_mats[key])
-
-
 func _tick_horde(delta: float) -> void:
 	if music != null:
 		_play_music(_boss_alive)
@@ -3942,14 +2381,14 @@ func _tick_zombie(z: Dictionary, body: CharacterBody3D, ppos: Vector3, player_al
 	var boss: bool = z.get("boss", false)
 	var reach: float = BOSS_REACH if boss else float(z.get("reach", ZOMBIE_REACH))
 	# Si tiene una baliza a mano la rompe: es lo que la activa por daño (enemy._beacon_in_reach).
-	var bc := _beacon_in_reach(pos, reach + 0.6)
+	var bc := combat.beacon_in_reach(Fighter.TEAM_HORDE, pos, reach + 0.6)
 	if not bc.is_empty():
 		body.velocity = Vector3(0, body.velocity.y, 0)
 		if z["swing_t"] <= 0.0:
 			z["swing_t"] = ZOMBIE_SWING
 			bc["hp"] = float(bc["hp"]) - ZOMBIE_DMG * 2.0
 			_play_all(anims, "Sword_Attack")
-			_burst("spark_04", (bc["node"] as Node3D).global_position + Vector3(0, 0.7, 0),
+			vfx.burst("spark_04", (bc["node"] as Node3D).global_position + Vector3(0, 0.7, 0),
 				bc["col"], 8, 0.3, 2.5, 0.3, -3.0)
 		body.velocity.y -= GRAVITY * delta
 		body.move_and_slide()
@@ -3984,9 +2423,9 @@ func _tick_zombie(z: Dictionary, body: CharacterBody3D, ppos: Vector3, player_al
 			z["swing_t"] = ZOMBIE_SWING
 			var dmg := ZOMBIE_DMG * (BOSS_DMG_MULT if boss else float(z.get("dmg", 1.0)))
 			if prey.is_empty():
-				_damage_player(dmg)
+				combat.hurt(pf.rec, dmg)
 			else:
-				_hurt_ally(prey, dmg)
+				combat.hurt(prey, dmg)
 			_play_all(anims, "Sword_Attack")
 		elif ap != null and ap.current_animation == "":
 			_play_all(anims, "Zombie_Idle")
@@ -4027,38 +2466,6 @@ func _tick_zombie(z: Dictionary, body: CharacterBody3D, ppos: Vector3, player_al
 	body.move_and_slide()
 
 
-## El estallido de una zona. Rayos para la tormenta, una corona de tierra para los golpes de
-## suelo (Terremoto y Golpe de tierra) y una andanada que cae del cielo para la Lluvia de flechas.
-func _zone_burst(st: Dictionary, at: Vector3, rad: float) -> void:
-	var col: Color = st.get("col", SPARK)
-	match String(st.get("fx", "spark")):
-		"dust":
-			# Ojo con el orden: el penúltimo par es (gravedad, apertura) y el último el radio de
-			# emisión. El TAMAÑO es el argumento 7: ponerle ahí el radio de la zona daba
-			# partículas de 3 m y la cámara se metía dentro, como ya pasó con el gas.
-			_burst("dirt_02", at + Vector3(0, 0.2, 0), Color(0.62, 0.52, 0.38, 0.95),
-				90, 1.1, 3.5, 0.9, -3.0, 80.0, rad * 0.8)
-			_burst("smoke_04", at + Vector3(0, 0.3, 0), Color(0.70, 0.62, 0.50, 0.7),
-				45, 1.6, 1.6, 1.5, 0.3, 70.0, rad * 0.9)
-			for k in 8:
-				var a := TAU * k / 8.0
-				_burst("dirt_03", at + Vector3(cos(a), 0.1, sin(a)) * rad * 0.85,
-					Color(0.55, 0.46, 0.33, 0.9), 12, 0.9, 2.6, 0.5, -3.0, 85.0, 0.4)
-		"arrows":
-			# Caen de arriba: nacen a 6 m y la gravedad fuerte las clava en el suelo. `_burst`
-			# siempre lanza hacia arriba, así que la caída tiene que salir de la gravedad.
-			# Pocas y finas: 70 partículas aditivas en una bola de 2,5 m se suman hasta dar un
-			# disco crema opaco, no una andanada. Se ven mejor 34 estrías que 70 manchas.
-			_burst("trace_01", at + Vector3(0, 6.0, 0), Color(col.r, col.g, col.b, 0.5),
-				34, 0.85, 0.6, 0.22, -18.0, 15.0, rad * 0.95)
-			_burst("dirt_01", at + Vector3(0, 0.15, 0), Color(0.6, 0.55, 0.4, 0.8),
-				30, 0.8, 1.6, 0.5, -2.0, 80.0, rad * 0.8)
-		_:
-			for k in int(st.get("bolts", 0)):
-				var a := TAU * k / maxi(1, int(st["bolts"]))
-				_spark(at + Vector3(cos(a), 0, sin(a)) * rad * 0.6 * rng.randf())
-
-
 ## Empuje suave entre zombis para que rodeen en vez de apilarse (el juego hace lo mismo
 ## en enemy._separation, pero allí con celdas espaciales).
 func _separation(body: CharacterBody3D) -> Vector3:
@@ -4076,48 +2483,12 @@ func _separation(body: CharacterBody3D) -> Vector3:
 	return push
 
 
-func _damage_player(amount: float) -> void:
-	if _php <= 0.0:
-		return
-	var mult := (1.0 - _buff_resist) if _buff_left > 0.0 else 1.0
-	if _guard:
-		mult *= GUARD_DAMAGE_MULT
-	_php -= amount * mult
-	_hurt_t = 0.25
-	if _php <= 0.0:
-		_php = 0.0
-		_streak = 0
-		_pdead_t = RESPAWN_TIME
-		_play_all(player_anims, "Death01")
-
-
-func _player_attack() -> void:
-	var origin := player.global_position
-	var facing := Vector3(sin(player_model.rotation.y), 0, cos(player_model.rotation.y))
-	var hits := 0
-	for z in zombies:
-		if z["dead_t"] >= 0.0:
-			continue
-		var body: CharacterBody3D = z["node"]
-		var to := body.global_position - origin
-		to.y = 0.0
-		if to.length() > ATTACK_RANGE:
-			continue
-		if facing.angle_to(to.normalized()) > ATTACK_ARC:
-			continue
-		z["hp"] -= ATTACK_DMG
-		z["bar_t"] = BAR_SHOW
-		hits += 1
-		if z["hp"] <= 0.0:
-			_kill_zombie(z)
-
-
 func _kill_zombie(z: Dictionary) -> void:
 	z["dead_t"] = 0.0
 	if float(z.get("spore_t", 0.0)) > 0.0:
-		_spore_burst(z)
+		combat.spore_burst(z)
 	_kills += 1
-	_streak += 1
+	pf.streak += 1
 	_show_badge(_badge_for())
 	if z.get("boss", false):
 		_boss_alive = false
@@ -4133,8 +2504,8 @@ func _kill_zombie(z: Dictionary) -> void:
 func _tick_player_death(delta: float) -> void:
 	if _php > 0.0:
 		return
-	_pdead_t -= delta
-	if _pdead_t > 0.0:
+	pf.respawn_t -= delta
+	if pf.respawn_t > 0.0:
 		return
 	var c := _spawn_cell()
 	player.position = _cell_pos(c.x, c.y) + Vector3(0, 0.3, 0)
@@ -4146,7 +2517,7 @@ func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	hud = Label.new()
-	hud.position = Vector2(14, 10)
+	hud.position = Vector2(88, 10)     # a la derecha del botón de pausa (☰)
 	hud.add_theme_color_override("font_color", Color.WHITE)
 	hud.add_theme_color_override("font_outline_color", Color.BLACK)
 	hud.add_theme_constant_override("outline_size", 5)
@@ -4177,6 +2548,10 @@ func _apply_cam_mode() -> void:
 
 
 func _unhandled_input(e: InputEvent) -> void:
+	if _mode == "menu" or player == null:
+		return
+	if team_mode != null and team_mode.rules.state != "playing":
+		return
 	if e is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var mm := e as InputEventMouseMotion
 		_yaw -= mm.relative.x * 0.005
@@ -4212,9 +2587,11 @@ func _unhandled_input(e: InputEvent) -> void:
 				KEY_R:
 					_preview = 2
 				KEY_TAB:
-					switch_legend(1)
+					if team_mode == null:      # por equipos la leyenda es la de la partida
+						switch_legend(1)
 				KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7:
-					switch_legend(k.physical_keycode - KEY_1 - _legend)
+					if team_mode == null:
+						switch_legend(k.physical_keycode - KEY_1 - _legend)
 				KEY_F10:
 					get_tree().quit()
 		else:
@@ -4229,26 +2606,24 @@ func _unhandled_input(e: InputEvent) -> void:
 						_try_cast(2)
 
 
-func _attack() -> void:
-	if _attacking or _php <= 0.0 or player_anim == null or not player_anim.has_animation("Sword_Attack"):
-		return
-	_attacking = true
-	_play_all(player_anims, "Sword_Attack")
-	_player_attack()
-
-
-func _on_anim_done(name: StringName) -> void:
-	if name == "Sword_Attack":
-		_attacking = false
-
-
+## Una vuelta de física: tu muerte y reaparición, el combate (leyendas y mundo), la horda, el gas
+## y por último tu movimiento, que lee el teclado o el joystick y lo pasa a tu leyenda.
 func _physics_process(delta: float) -> void:
 	if player == null:
 		return
-	_hurt_t = maxf(0.0, _hurt_t - delta)
-	_tick_player_death(delta)
+	if _mode == "menu":
+		_yaw += delta * 0.06
+		pivot.global_position = Vector3(0, 2.0, 0)
+		pivot.rotation.y = _yaw
+		spring.rotation.x = _pitch
+		return
+	if team_mode == null:
+		_tick_player_death(delta)
 	_tick_powers(delta)
-	_tick_horde(delta)
+	if team_mode == null:
+		_tick_horde(delta)
+	else:
+		team_mode.tick(delta)
 	_tick_zone(delta)
 	var basis := cam.global_transform.basis
 	var fwd := -basis.z
@@ -4259,57 +2634,68 @@ func _physics_process(delta: float) -> void:
 	right = right.normalized()
 
 	var wish := Vector3.ZERO
-	var winding_dash := _windup >= 0.0 and _windup_idx >= 0 and String(_abil(_windup_idx)["k"]) == "dash"
-	var locked := _dash_left > 0.0 or winding_dash or (_buff_left > 0.0 and _buff_root) \
-		or _swing_charge_t >= CHARGE_MIN
-	if locked:
+	var frozen := team_mode != null and team_mode.rules.state != "playing"
+	if frozen or (team_mode != null and team_mode.autoplay):
 		pass
-	elif touch and _php > 0.0:
+	elif touch:
 		wish = right * _joy_vec.x - fwd * _joy_vec.y
-	elif not locked and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and _php > 0.0:
+	elif Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if Input.is_physical_key_pressed(KEY_W): wish += fwd
 		if Input.is_physical_key_pressed(KEY_S): wish -= fwd
 		if Input.is_physical_key_pressed(KEY_D): wish += right
 		if Input.is_physical_key_pressed(KEY_A): wish -= right
-	var moving := wish.length() > 0.01
-	if moving:
-		wish = wish.normalized()
 	# Agacharse: Ctrl mantenido. Frena mucho, pero dentro de una mancha de hierba alta te borra
 	# del mapa para las criaturas.
-	_crouch = not locked and _php > 0.0 and (Input.is_physical_key_pressed(KEY_CTRL) or _touch_crouch)
-	var spd := legend_speed()
-	if _crouch:
-		spd *= CROUCH_MULT
-	elif Input.is_physical_key_pressed(KEY_SHIFT):
-		spd *= 1.6
-
-	player.velocity.x = wish.x * spd
-	player.velocity.z = wish.z * spd
-	player.velocity.y -= GRAVITY * delta
-	if player.is_on_floor() and player.velocity.y < 0.0:
-		player.velocity.y = -1.0
-	player.move_and_slide()
-
-	if moving and player_model != null:
-		var target := atan2(wish.x, wish.z)
-		player_model.rotation.y = lerp_angle(player_model.rotation.y, target, TURN_SPEED * delta)
-
-	_cast_anim_t = maxf(0.0, _cast_anim_t - delta)
-	if player_anim != null and not _attacking and _cast_anim_t <= 0.0 and _php > 0.0:
-		var want := ("Crouch_Fwd" if moving else "Crouch_Idle") if _crouch \
-			else ("Jog_Fwd" if moving else "Idle")
-		if not player_anim.has_animation(want):
-			want = "Jog_Fwd" if moving else "Idle"
-		if player_anim.current_animation != want:
-			_play_all(player_anims, want)
-		for ap2 in player_anims:
-			ap2.speed_scale = (spd / legend_speed()) if moving else 1.0
+	pf.crouch = Input.is_physical_key_pressed(KEY_CTRL) or _touch_crouch
+	pf.run = Input.is_physical_key_pressed(KEY_SHIFT)
+	if team_mode == null or not team_mode.autoplay:
+		pf.wish = wish
+		combat.move_fighter(pf, delta)
+	if team_mode != null:
+		team_mode.move_bots(delta)
 
 	# La cámara baja con el jugador: agachado detrás de un peñasco tienes que ver lo mismo que él.
-	var want_h := _cam_height * (0.62 if _crouch else 1.0)
-	pivot.global_position = player.global_position + Vector3(0, want_h, 0)
+	# Por rondas, si has caído sigue a un compañero en pie hasta que acabe la ronda.
+	var want_h := _cam_height * (0.62 if pf.crouch else 1.0)
+	var follow := pf
+	if team_mode != null and not pf.alive():
+		for o: Fighter in combat.fighters:
+			if o.team == pf.team and o.alive():
+				follow = o
+				break
+	pivot.global_position = follow.pos() + Vector3(0, want_h, 0)
 	pivot.rotation.y = _yaw
 	spring.rotation.x = _pitch
+
+
+## Estado de todas las leyendas, luz, barras, mira y después todo lo que hay en el mundo.
+func _tick_powers(delta: float) -> void:
+	# Mantener la básica carga el mandoble (solo la leyenda que lo tiene).
+	pf.holding_basic = (_aim_btn == 0) or (not touch and Input.is_physical_key_pressed(KEY_Q))
+	for f: Fighter in combat.fighters:
+		combat.tick_fighter(f, delta)
+	_tick_daylight(delta)
+	combat.tick_bars(delta)
+
+	var prev_r := _ability_range(_preview) if _preview >= 0 else 6.0
+	var aim := _aim_point(prev_r)
+	if touch and _aim_btn >= 0:
+		aim = _aim_point_touch(_preview)
+	_aim_dot.position = aim + Vector3(0, 0.05, 0)
+	_aim_ring.visible = _preview >= 1
+	if _preview >= 1:
+		_aim_ring.position = aim + Vector3(0, 0.05, 0)
+		var r := _ability_radius(_preview)
+		var t := _aim_ring.mesh as TorusMesh
+		t.outer_radius = r
+		t.inner_radius = maxf(0.05, r - 0.12)
+
+	if _args.has("autocast"):
+		_auto_cast()
+	if team_mode != null:
+		team_mode.tick_brains(delta)
+
+	combat.tick_world(delta)
 
 
 ## Premios de racha del propio juego (hud.KILL_REWARD_NAMES). No hay insignia 2.
@@ -4328,17 +2714,17 @@ func _badge_for() -> int:
 		return 1
 	# En match._reward_kill la condición de "La parca" es sobre la RACHA (total >= 10), no sobre
 	# las bajas totales. Con bajas totales la insignia salía en CADA baja a partir de la décima.
-	if _streak >= 10:
+	if pf.streak >= 10:
 		return mini(_kills, 11)
-	if _streak >= 3:
-		return mini(_streak, 9)
+	if pf.streak >= 3:
+		return mini(pf.streak, 9)
 	return 0
 
 
 func _show_badge(badge: int) -> void:
 	if badge == 0 or not KILL_REWARD_NAMES.has(badge):
 		return
-	print("INSIGNIA %d: %s  (racha %d, bajas %d)" % [badge, KILL_REWARD_NAMES[badge], _streak, _kills])
+	print("INSIGNIA %d: %s  (racha %d, bajas %d)" % [badge, KILL_REWARD_NAMES[badge], pf.streak, _kills])
 	if _badge_img == null:
 		var layer := CanvasLayer.new()
 		layer.layer = 25
@@ -4391,10 +2777,14 @@ func _slot(i: int) -> String:
 	var name := String(ab["n"])
 	if swap_ready(i):
 		return "[%s CAMBIAR]" % name
+	if i == 2 and pf.ult_by_charge:
+		return "[%s %s]" % [name, "LISTA" if pf.ability_ready(2) else "carga " + pf.cooldown_text(2)]
 	if int(ab.get("chg", 0)) > 0:
 		return "[%s %d/%d]" % [name, _chg[i], int(ab["chg"])]
-	if _cd[i] > 0.0:
-		return "[%s %.0fs]" % [name, _cd[i]]
+	if i == 0 and pf.ammo_max > 0:
+		return "[%s %d/%d]" % [name, pf.ammo, pf.ammo_max]
+	if pf.cd[i] > 0.0:
+		return "[%s %.0fs]" % [name, pf.cd[i]]
 	return "[%s LISTA]" % name
 
 var _log_t := 0.0
@@ -4402,6 +2792,16 @@ var _last_anim := ""
 var _fx_t := 0.0
 
 func _process(_d: float) -> void:
+	if _mode == "menu":
+		if _shot != "":
+			_shot_wait -= 1
+			if _shot_wait == 0:
+				var mimg := get_viewport().get_texture().get_image()
+				if mimg != null:
+					mimg.save_png(_shot)
+					print("captura: ", _shot)
+				get_tree().quit()
+		return
 	if touch_ui != null:
 		touch_ui.queue_redraw()
 	if _args.has("fxtest") and player != null:
@@ -4410,8 +2810,8 @@ func _process(_d: float) -> void:
 		if _fx_t <= 0.0:
 			_fx_t = 0.12
 			var f := Vector3(sin(player_model.rotation.y), 0, cos(player_model.rotation.y))
-			_spark(player.global_position + f * 4.0 + Vector3(rng.randf_range(-1.5, 1.5), 0, rng.randf_range(-1.5, 1.5)))
-			if bolts.is_empty():
+			vfx.spark(player.global_position + f * 4.0 + Vector3(rng.randf_range(-1.5, 1.5), 0, rng.randf_range(-1.5, 1.5)))
+			if combat.bolts.is_empty():
 				# El proyectil de la leyenda, sea cual sea su ranura: el Rompemareas lo tiene en
 				# la 1 (el Enganche), no en la básica, y antes salía una bola con los datos del
 				# mandoble.
@@ -4420,13 +2820,13 @@ func _process(_d: float) -> void:
 					if String(_abil(k)["k"]) == "proj":
 						pi = k
 						break
-				_cast_projectile(_abil(pi), player.global_position + f * 16.0)
-			if _decoy_alive().is_empty() and String(_abil(1)["k"]) == "decoy":
-				_do_cast(1, player.global_position + f * 4.0)   # para ver el botón de intercambio
+				combat.cast_projectile(pf, pf.abil(pi), player.global_position + f * 16.0)
+			if combat.decoy_alive(pf).is_empty() and String(_abil(1)["k"]) == "decoy":
+				combat.do_cast(pf, 1, player.global_position + f * 4.0)   # para ver el botón de intercambio
 			# Si la definitiva es una zona, se relanza en bucle: así el estallido (el polvo del
 			# Terremoto, la andanada de la Lluvia) siempre está a la vista para juzgarlo.
-			if storms.is_empty() and String(_abil(2)["k"]) == "zone":
-				_do_cast(2, player.global_position + f * float(_abil(2).get("rng", 0.0)) * PX)
+			if combat.storms.is_empty() and String(_abil(2)["k"]) == "zone":
+				combat.do_cast(pf, 2, player.global_position + f * float(_abil(2).get("rng", 0.0)) * PX)
 	if _args.has("bench"):
 		_log_t -= 1.0
 		if _log_t <= 0.0:
@@ -4476,14 +2876,21 @@ func _process(_d: float) -> void:
 		return
 	if hud == null:
 		return
+	if team_mode != null:
+		var st := "vida %d/%d" % [int(_php), int(pf.hp_max())] if pf.alive() else "CAÍDO"
+		hud.text = ("%s  ·  %s%s\n%d FPS%s\n%s   %s   %s\n"
+			+ "clic izq / Q básica · clic der o E táctica · R definitiva · WASD · Shift correr · Ctrl agacharse · C cámara · Esc ratón · F10 salir") % [
+			pf.display_name, st, ("  ·  OCULTO" if player_hidden() else ""),
+			Engine.get_frames_per_second(), _zone_hud(), _slot(0), _slot(1), _slot(2)]
+		return
 	var cx := int(round(player.global_position.x / CELL + mw * 0.5))
 	var cy := int(round(player.global_position.z / CELL + mh * 0.5))
 	var zone := "campo"
 	if cx >= 0 and cx < mw and cy >= 0 and cy < mh:
 		zone = ["campo", "cueva", "cementerio"][zones[cx][cy]]
-	var estado := "MUERTO — vuelves en %.0f s" % maxf(_pdead_t, 0.0) if _php <= 0.0 else "vida %d/%d" % [int(_php), int(PLAYER_HP)]
+	var estado := "MUERTO — vuelves en %.0f s" % maxf(pf.respawn_t, 0.0) if _php <= 0.0 else "vida %d/%d" % [int(_php), int(PLAYER_HP)]
 	var oculto := ""
-	if _crouch:
+	if pf.crouch:
 		oculto = "  ·  AGACHADO" + ("  ·  OCULTO" if player_hidden() else "")
 	hud.text = ("%s  ·  OLEADA %d   ·   criaturas vivas %d   ·   por salir %d   ·   bajas %d   ·   %s%s\n"
 		+ "%d FPS   |   %d props   |   celda %d,%d (%s)%s\n"
