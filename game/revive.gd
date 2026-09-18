@@ -18,6 +18,7 @@ const INVULN := 3.0                     # y sin recibir daño un rato
 const BLEED_TIME := 45.0                # derribado: lo que tardan en levantarlo antes de que muera
 const FINISH_HP := 1.5                  # rematar: este tanto de su vida máxima en daño lo mata
 const CRAWL_SPEED := 0.25               # se arrastra a este tanto de su velocidad
+const HINT_RANGE := 10.0                # a esta distancia el aviso ya te dice cuántos metros te faltan
 # Animaciones (Universal Animation Library Pro de Quaternius, 2026-09-17): el derribado GATEA de
 # verdad (Crawl_*, en las cuatro direcciones) y quien lo levanta se arrodilla. Antes, sin la Pro, se
 # usaba la de nadar pegada al suelo como apaño y el usuario lo notó enseguida.
@@ -39,3 +40,17 @@ static func progress(p: float, helped: bool, delta: float) -> float:
 ## ¿Puede levantar a un derribado alguien vivo, agachado o no, a esta distancia?
 static func can_help(helper_alive: bool, helper_crouch: bool, dist: float) -> bool:
 	return helper_alive and helper_crouch and dist <= RANGE
+
+
+## Aviso que lee el jugador cuando un compañero suyo está en el suelo (petición del usuario,
+## 2026-09-18: "no veo cómo reanimar a mis compañeros caídos"). Antes solo decía "agáchate a su lado"
+## y solo en la Horda: ahora dice el nombre, a qué distancia está y qué botón es, y en PvP también.
+## Vacío si está tan lejos que no toca decir nada, o si ya lo está levantando (el progreso lo cuenta
+## otro aviso).
+static func hint(dist: float, crouching: bool, touch: bool, name: String) -> String:
+	var button := "el botón ▼" if touch else "Ctrl"
+	if dist <= RANGE:
+		return "" if crouching else "%s está a tus pies · agáchate (%s) para levantarlo" % [name, button]
+	if dist > HINT_RANGE:
+		return "%s está derribado: ve a por él" % name
+	return "%s está derribado a %d m · agáchate (%s) a su lado" % [name, int(round(dist)), button]

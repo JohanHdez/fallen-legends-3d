@@ -161,6 +161,12 @@ func _process(_delta: float) -> void:
 			var lifting := tm.revive.helping(pf)
 			if lifting != null:
 				_down.text = "Levantando a %s… %d %%" % [lifting.display_name, int(lifting.revive_progress * 100.0)]
+			else:
+				# Por equipos faltaba el aviso: solo lo tenía la Horda (usuario, 2026-09-18).
+				var mate := tm.main.downed_mate()
+				if mate != null:
+					_down.text = Revive.hint(pf.pos().distance_to(mate.pos()), pf.crouch,
+						tm.main.touch, mate.display_name)
 	if pf != null and pf.alive() and pf.marked_t > 0.0 and pf.mark_team != pf.team:
 		_mark.text = "¡Te han marcado por romper un señuelo! Te ven a través de todo · %d s" % int(ceil(pf.marked_t))
 	else:
@@ -191,14 +197,16 @@ func show_end() -> void:
 	why.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(why)
 	var grid := GridContainer.new()
-	grid.columns = 3
+	# Bajas, CAÍDAS (veces derribado) y MUERTES (las que nadie levantó): son cosas distintas y el
+	# usuario echaba de menos las terceras (2026-09-18).
+	grid.columns = 4
 	grid.add_theme_constant_override("h_separation", 28)
 	col.add_child(grid)
 	for team in [1, 2]:
 		var head := _label(22, TeamMode.TEAM_COLORS[team])
 		head.text = "Equipo %s" % TeamMode.TEAM_NAMES[team]
 		grid.add_child(head)
-		for txt in ["Bajas", "Caídas"]:
+		for txt in ["Bajas", "Caídas", "Muertes"]:
 			var h := _label(16, Color(0.7, 0.7, 0.75))
 			h.text = txt
 			grid.add_child(h)
@@ -206,7 +214,7 @@ func show_end() -> void:
 			var s: Dictionary = tm.rules.scores[fid]
 			if int(s["team"]) != team:
 				continue
-			for txt in [String(s["name"]), str(s["kills"]), str(s["deaths"])]:
+			for txt in [String(s["name"]), str(s["kills"]), str(s.get("downs", 0)), str(s["deaths"])]:
 				var cell := _label(20, Color(1, 1, 0.8) if s["is_player"] else Color.WHITE)
 				cell.text = txt
 				grid.add_child(cell)

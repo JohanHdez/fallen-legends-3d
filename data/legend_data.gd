@@ -75,8 +75,11 @@ const ABILITIES := {
 		# Sanación: el .tres trae 260 px; x3 a petición del usuario (4,1 m -> 12,2 m).
 		{"n": "Sanación", "col": Color(0.5, 1.0, 0.5), "sfx": "heal", "k": "heal", "cd": 7.0, "cast": 0.3, "heal": 35.0, "rad": 780.0,
 		 "anim": "Spell_Double_Shoot"},
-		{"n": "Esporas", "col": Color(0.5, 1.0, 0.4), "sfx": "gas", "k": "spores", "cd": 40.0, "cast": 0.5, "dmg": 10.0, "rng": 520.0, "rad": 190.0,
-		 "field": 10.0, "fdmg": 10.0, "tick": 1.0,
+		# Desviación del 2D (petición del usuario, 2026-09-18): el .tres trae 190 px de radio (3,0 m) y
+		# aquí van 300 (4,7 m), porque la nube se esquivaba andando. Y al lanzarla se pega al enemigo
+		# más cercano que haya bajo el punto apuntado (Combat.SNAP_R).
+		{"n": "Esporas", "col": Color(0.5, 1.0, 0.4), "sfx": "gas", "k": "spores", "cd": 40.0, "cast": 0.5, "dmg": 10.0, "rng": 520.0, "rad": 300.0,
+		 "field": 10.0, "fdmg": 10.0, "tick": 1.0, "snap": true,
 		 "anim": "Consume", "adur": 1.1},        # idea del usuario: se bebe el frasco para soltarlas
 	],
 	"ilusionista": [
@@ -93,11 +96,15 @@ const ABILITIES := {
 		{"n": "Lanzada", "col": Color(0.85, 0.85, 0.9), "sfx": "melee", "k": "melee", "cd": 0.8, "cast": 0.2, "dmg": 30.0, "rad": 115.0,
 		 "anim": "Sword_Regular_A"},
 		# Corte de hacha (antes "Carga con escudo": el Caballero lleva hacha, no escudo).
-		# Preaviso largo a propósito: se ve tomar impulso antes de salir.
-		{"n": "Corte de hacha", "col": Color(0.8, 0.3, 0.3), "sfx": "dash", "k": "dash", "cd": 7.0,
-		 "cast": 0.12, "dmg": 25.0, "rng": 700.0, "rad": 70.0, "spd": 900.0, "shove": 5.5, "sync": true,
-		 "anim": "Sword_Dash"},                  # idea del usuario: el avance rápido con espada (1,57 s,
-		                                          # lo mismo que duraba con Sword_Attack: la carga no cambia)
+		# Desviación del 2D (petición del usuario, 2026-09-18, "es muy lenta... debería poder escapar
+		# usando esa habilidad muy rápido, y activársele cada 5 segundos y la cadencia y área de daño
+		# deben aumentar"): recarga 7 -> 5 s, radio 70 -> 130 px (1,1 -> 2,0 m), daño 25 -> 32 y SIN
+		# "sync": ya no dura lo que la animación (1,57 s para 10,9 m, un paseo) sino lo que marca
+		# `spd` (1500 px/s = 23,4 m/s -> 0,47 s), con la animación acelerada al triple. Además
+		# Combat.cast_dash le quita el `slow_t`: con el gas encima era todavía más lenta.
+		{"n": "Corte de hacha", "col": Color(0.8, 0.3, 0.3), "sfx": "dash", "k": "dash", "cd": 5.0,
+		 "cast": 0.12, "dmg": 32.0, "rng": 700.0, "rad": 130.0, "spd": 1500.0, "shove": 5.5,
+		 "anim": "Sword_Dash"},
 		# Muro de espinas: el .tres trae 46 px de radio; x3 a petición del usuario (0,7 m -> 2,2 m).
 		{"n": "Muro de espinas", "col": Color(0.85, 0.35, 0.3), "sfx": "spikes", "k": "spikes", "cd": 25.0, "cast": 0.5, "dmg": 20.0, "rng": 840.0, "rad": 138.0,
 		 "dur": 10.0, "stun": 2.0, "tick": 1.0,
@@ -117,13 +124,21 @@ const ABILITIES := {
 		{"n": "Enganche", "col": Color(0.8, 0.68, 0.42), "sfx": "harpoon", "k": "proj", "cd": 20.0, "cast": 0.3, "dmg": 34.0, "rng": 1200.0, "spd": 780.0,
 		 "stun": 0.5, "pull": true, "solid": "anchor", "catch": 190.0,
 		 "anim": "OverhandThrow", "adur": 1.0},  # lanza el ancla por encima del hombro
-		{"n": "Ancla clavada", "col": Color(0.85, 0.7, 0.4), "sfx": "buff", "k": "buff", "cd": 26.0, "cast": 0.5, "dmg": 26.0, "rng": 300.0, "dur": 5.0,
-		 "resist": 0.3, "root": true, "tick": 0.8,
+		# Desviación del 2D (petición del usuario, 2026-09-18): el ancla se clava DONDE APUNTAS (hasta
+		# 8,1 m) y ya no lo deja plantado —fuera "root"—, así que puede elegir dónde amontonar a los
+		# enemigos y seguir peleando. El remolino tira de ellos en 4,7 m ("rad"), lo que antes era el
+		# alcance.
+		{"n": "Ancla clavada", "col": Color(0.85, 0.7, 0.4), "sfx": "buff", "k": "buff", "cd": 26.0, "cast": 0.5, "dmg": 26.0, "rng": 520.0, "rad": 300.0, "dur": 5.0,
+		 "resist": 0.3, "tick": 0.8,
 		 "anim": "Sword_Regular_B"},             # tajo de arriba abajo: clava el ancla en el suelo
 	],
 	"liche": [
-		{"n": "Rayo gélido", "col": Color(0.5, 0.9, 1.0), "sfx": "proj_frost", "k": "proj", "cd": 0.7, "cast": 0.14, "dmg": 26.0, "rng": 700.0, "spd": 650.0, "homing": true},
-		{"n": "Alzar esqueleto", "col": Color(0.85, 0.9, 0.75), "sfx": "summon", "k": "summon", "cd": 6.0, "cast": 0.3, "rad": 70.0, "chg": 3, "count": 1,
+		# Desviaciones del 2D (petición del usuario, 2026-09-18, "no dispara lo suficientemente rápido,
+		# es malo contra todos"): el rayo sale cada 0,5 s en vez de 0,7 y los esqueletos se alzan cada
+		# 4,5 s en vez de cada 6 (sus otros arreglos están en Minions). El DAÑO se queda en los 26 del
+		# 2D: con 28 ganaba 10 de 12 duelos por parejas, más que ninguna.
+		{"n": "Rayo gélido", "col": Color(0.5, 0.9, 1.0), "sfx": "proj_frost", "k": "proj", "cd": 0.5, "cast": 0.14, "dmg": 26.0, "rng": 700.0, "spd": 650.0, "homing": true},
+		{"n": "Alzar esqueleto", "col": Color(0.85, 0.9, 0.75), "sfx": "summon", "k": "summon", "cd": 4.5, "cast": 0.3, "rad": 70.0, "chg": 3, "count": 1,
 		 "anim": "Spell_Double_Shoot"},
 		{"n": "Alzar ejército", "col": Color(0.8, 0.9, 0.7), "sfx": "summon", "k": "summon", "cd": 30.0, "cast": 0.6, "rng": 400.0, "rad": 90.0, "count": 7,
 		 "anim": "Spell_Double_Enter"},          # levanta a los siete con las dos manos
@@ -173,7 +188,7 @@ const PVP_AMMO := {
 	"tormentero": {"n": 3, "reload": 1.0},
 	"clerigo": {"n": 3, "reload": 1.0},
 	"quimico": {"n": 3, "reload": 1.0},
-	"liche": {"n": 3, "reload": 1.15},
+	"liche": {"n": 3, "reload": 1.0},    # su rayo es lo único que tiene de lejos (usuario, 2026-09-18)
 	"caballero": {"n": 3, "reload": 1.0},
 	"rompemareas": {"n": 3, "reload": 1.4},
 }

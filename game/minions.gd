@@ -22,9 +22,13 @@ const AMBUSH_RADIUS := 3.0
 const AMBUSH_RANGE := 12.0
 const AMBUSH_TRIGGER := 4.0
 const HIT_REACH := 2.0
-const HIT_DMG := 18.0
-const HIT_EVERY := 1.4
-const SPEED := 200.0 * LegendData.PX       # 3,1 m/s, la del esbirro del 2D (enemy_type.speed)
+# Petición del usuario (2026-09-18): "los esqueletos son muy débiles, no golpean lo suficientemente
+# rápido". Golpean cada 0,85 s en vez de cada 1,4 (+65 % de daño sostenido), pegan 20 en vez de 18 y
+# corren a 3,6 m/s en vez de 3,1, que es lo que les costaba alcanzar a nadie. Su vida sube en
+# Combat.MINION_HP. Son desviaciones del esbirro del 2D, todas a petición suya.
+const HIT_DMG := 20.0
+const HIT_EVERY := 0.85
+const SPEED := 230.0 * LegendData.PX       # 3,6 m/s (el esbirro del 2D va a 200 px/s)
 const ATTACK_SEARCH := 80.0                # "esté donde esté": todo el mapa
 const BURY_DEPTH := 0.9
 

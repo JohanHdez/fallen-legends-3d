@@ -60,6 +60,13 @@ func setup(p_mode: String) -> void:
 	if legend != pf.legend:
 		combat.set_legend(pf, legend)
 	var picks := GameModes.pick_legends(pf.legend, size, Main.PLAYABLE, main.rng)
+	# --foe=N: fija la leyenda del equipo rival (todas, si son varias). Solo para MEDIR: un torneo
+	# por parejas necesita elegir el emparejamiento, y sin esto el rival salía del sorteo y unas
+	# parejas se repetían y otras no salían nunca (2026-09-18).
+	if main._args.has("foe"):
+		var foe := clampi(int(main._args["foe"]), 0, LegendData.LEGENDS.size() - 1)
+		for i in (picks[2] as Array).size():
+			picks[2][i] = foe
 	rules = TeamMatch.new()
 	rules.setup(int(main._args.get("rounds", str(TeamMatch.ROUNDS_TO_WIN))),
 		float(main._args.get("roundtime", str(TeamMatch.ROUND_TIME))))
@@ -310,6 +317,7 @@ func _revive(f: Fighter, c: Vector2i) -> void:
 ## Una leyenda ha sido derribada: aún no es baja (tiene 45 s para que la levanten).
 func on_fighter_down(f: Fighter, by: Fighter) -> void:
 	revive.on_down(f)
+	rules.on_down(f.id)
 	print("[DERRIBO] %s derriba a %s" % [by.display_name if by != null else "el gas", f.display_name])
 
 
@@ -344,6 +352,7 @@ func _on_over() -> void:
 
 ## Otra partida igual (mismo modo y misma leyenda).
 func restart() -> void:
+	Engine.set_meta("fl_seed", Main.new_seed())   # la revancha no repite el mismo sorteo
 	Engine.set_meta("fl_mode", mode)
 	Engine.set_meta("fl_legend", main.pf.legend)
 	main.get_tree().reload_current_scene()

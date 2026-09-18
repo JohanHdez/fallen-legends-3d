@@ -17,6 +17,8 @@ const UAL2 := LegendData.UAL2
 const CELL := 3.0        # metros por celda del mapa del juego (192x96 px en isométrico)
 const WALL_H := 7.0      # alto de la colisión de los muros
 const MAP_SEED := 1234
+const SPAWN_SPREAD := 7.0           # celdas alrededor del centro donde puede caer tu salida en la Horda
+
 const GRASS_FIELDS := 16       # manchas de hierba alta donde esconderse agachado
 const GRASS_RADIUS := 3        # celdas de radio de cada mancha
 # Hierba MEDIA (por la cintura) y eriales de tierra y roca: petición del usuario (2026-09-17),
@@ -114,6 +116,7 @@ const WEAPON_ROT := Vector3(0.0, 0.0, 0.0)
 # --- táctil ---
 # Las mismas que scripts/touch_controls.gd del juego 2D, para que el tacto sea idéntico.
 const JOY_RADIUS := 95.0
+const JOY_RUN := 0.92               # joystick al borde = correr (en el móvil no hay tecla Mayúsculas)
 const JOY_GRAB := 1.7        # el joystick responde hasta este múltiplo de su radio
 const KNOB_RADIUS := 42.0
 const DEAD_ZONE := 0.18
@@ -300,8 +303,15 @@ func _ready() -> void:
 	show_fps = bool(Engine.get_meta("fl_fps", false))
 	# `--seed=N` cambia el sorteo de la partida (reparto de leyendas, decoración, esquivas) SIN mover
 	# el mapa, que sigue saliendo de MAP_SEED: así se pueden medir varias partidas distintas del mismo
-	# escenario. Sin el flag, la semilla es la de siempre y las trazas deterministas no cambian.
-	rng.seed = int(_args["seed"]) if String(_args.get("seed", "")).is_valid_int() else MAP_SEED
+	# escenario. Si no viene el flag, manda la semilla que haya dejado el menú (`fl_seed`, distinta en
+	# cada partida desde 2026-09-18, a petición del usuario: hierba, decoración, tu sitio de salida y
+	# los sorteos cambian de una partida a otra). Y si tampoco la hay —headless, pruebas y sondas—,
+	# la de siempre: las trazas deterministas no se mueven.
+	rng.seed = MAP_SEED
+	if String(_args.get("seed", "")).is_valid_int():
+		rng.seed = int(_args["seed"])
+	elif Engine.has_meta("fl_seed"):
+		rng.seed = int(Engine.get_meta("fl_seed"))
 	vfx = Vfx.new(self, rng, touch)
 	combat = Combat.new(self, vfx)
 	var t0 := Time.get_ticks_msec()
@@ -793,7 +803,7 @@ func _tick_zone(delta: float) -> void:
 	if mat != null:
 		mat.set_shader_parameter("t", _zone_t)
 	# El velo sube y baja suave, y late mientras estás dentro: que se note que te está matando.
-	var inside_gas := _php > 0.0 and _outside_zone(player.global_position)
+	var inside_gas := _php > 0.0 and _outside_zone(player.global_position) and not combat.gas_immune(pf.team)
 	var want := (0.60 + 0.28 * sin(_zone_t * 7.0)) if inside_gas else 0.0
 	_zone_veil_a = move_toward(_zone_veil_a, want, delta * (4.0 if inside_gas else 2.0))
 	if _zone_veil != null and _zone_veil.material != null:
@@ -805,7 +815,7 @@ func _tick_zone(delta: float) -> void:
 		return
 	_zone_hurt = 0.5
 	for f: Fighter in combat.fighters:
-		if f.alive() and _outside_zone(f.pos()):
+		if f.alive() and _outside_zone(f.pos()) and not combat.gas_immune(f.team):
 			# Por equipos la vida va ×3 y el gas también: si no, dejaría de apretar.
 			combat.hurt(f.rec, ZONE_DPS * 0.5 * f.hp_mult)
 			vfx.burst("smoke_02", f.pos() + Vector3(0, 1.0, 0),
@@ -827,7 +837,7 @@ func _zone_hud() -> String:
 		var left := _zone_wait - _zone_t
 		return "   |   el gas cierra en %d:%02d" % [int(left) / 60, int(left) % 60]
 	if _outside_zone(player.global_position):
-		return "   |   ¡ESTÁS EN EL GAS!"
+		return "   |   en el gas (tu máscara aguanta)" if combat.gas_immune(pf.team) else "   |   ¡ESTÁS EN EL GAS!"
 	var d := _zone_r - Vector2(player.global_position.x - _zone_c.x, player.global_position.z - _zone_c.z).length()
 	return "   |   borde del gas a %d m (radio %d)" % [int(d), int(_zone_r)]
 
@@ -1399,6 +1409,30 @@ func is_pvp() -> bool:
 	return team_mode != null
 
 
+## El compañero DERRIBADO más cercano a tu leyenda, o null (petición del usuario, 2026-09-18: "no veo
+## cómo reanimar a mis compañeros caídos"). Lo usan el aviso de los HUD y el botón de agacharse, que se
+## enciende en verde cuando lo tienes al alcance.
+func downed_mate() -> Fighter:
+	if pf == null or not pf.alive():
+		return null
+	var best: Fighter = null
+	var best_d := INF
+	for f: Fighter in combat.fighters:
+		if f == pf or f.team != pf.team or not f.downed:
+			continue
+		var d := pf.pos().distance_to(f.pos())
+		if d < best_d:
+			best_d = d
+			best = f
+	return best
+
+
+## ¿Tienes a un compañero derribado a tiro de levantarlo? (para encender el botón de agacharse)
+func can_revive_now() -> bool:
+	var m := downed_mate()
+	return m != null and pf.pos().distance_to(m.pos()) <= Revive.RANGE
+
+
 ## Una leyenda ha sido derribada (aún no es baja): 45 s para que la levanten.
 func on_fighter_down(f: Fighter, by: Fighter) -> void:
 	if team_mode != null:
@@ -1546,10 +1580,22 @@ func _try_cast(i: int, at := Vector3.INF) -> void:
 	combat.start_cast(pf, i, at)
 
 
-## Celda de suelo de campo más cercana al centro del mapa.
+## Semilla de una partida nueva, la que guardan el menú y la revancha en `fl_seed` (petición del
+## usuario, 2026-09-18: que cada partida sea distinta). Del reloj, no de `randomize()`: el juego no
+## sortea nunca por su cuenta (regla de determinismo de CLAUDE.md), y las pruebas y sondas, que no
+## pasan por el menú, siguen con MAP_SEED.
+static func new_seed() -> int:
+	return int(Time.get_unix_time_from_system()) ^ (Time.get_ticks_usec() << 8)
+
+
+## Dónde empiezas en la Horda: una celda de campo de la zona central, sorteada entre las que hay a
+## menos de SPAWN_SPREAD celdas del centro (petición del usuario, 2026-09-18: antes salías SIEMPRE en
+## la misma, así que la primera oleada caía siempre en el mismo claro). Con la semilla de siempre
+## —pruebas y sondas— sale siempre la misma, porque el sorteo es del `rng`.
 func _spawn_cell() -> Vector2i:
 	var best := Vector2i(mw / 2, mh / 2)
 	var best_d := 1e9
+	var pool: Array[Vector2i] = []
 	for x in mw:
 		for y in mh:
 			if not MapBuilder.walkable(grid[x][y]) or zones[x][y] != 0:
@@ -1558,7 +1604,9 @@ func _spawn_cell() -> Vector2i:
 			if d < best_d:
 				best_d = d
 				best = Vector2i(x, y)
-	return best
+			if d <= SPAWN_SPREAD:
+				pool.append(Vector2i(x, y))
+	return pool[rng.randi() % pool.size()] if not pool.is_empty() else best
 
 
 ## Tres compañeros de pie junto al jugador: es "la sala" del juego, pero en 3D.
@@ -2457,7 +2505,10 @@ func _physics_process(delta: float) -> void:
 	# Agacharse: Ctrl mantenido. Frena mucho, pero dentro de una mancha de hierba alta te borra
 	# del mapa para las criaturas.
 	pf.crouch = Input.is_physical_key_pressed(KEY_CTRL) or _touch_crouch
-	pf.run = Input.is_physical_key_pressed(KEY_SHIFT)
+	# Correr: Mayúsculas, y en el móvil llevando el joystick al borde (JOY_RUN). Hasta el 2026-09-18
+	# en táctil NO se podía correr, y ese mismo día los bots empezaron a correr al perseguir: el móvil
+	# se quedaba sin la única forma de alcanzar a nadie y sin la de escapar.
+	pf.run = Input.is_physical_key_pressed(KEY_SHIFT) or (touch and _joy_vec.length() >= JOY_RUN)
 	if not _autoplay():
 		pf.wish = wish
 		combat.move_fighter(pf, delta)
@@ -2467,10 +2518,12 @@ func _physics_process(delta: float) -> void:
 		horde_mode.move_bots(delta)
 
 	# La cámara baja con el jugador: agachado detrás de un peñasco tienes que ver lo mismo que él.
-	# Por rondas, si has caído sigue a un compañero en pie hasta que acabe la ronda.
-	var want_h := _cam_height * (0.62 if pf.crouch else 1.0)
+	# Si has MUERTO sigue a un compañero en pie; DERRIBADO no, que sigues jugando: te arrastras y te
+	# escondes mientras alguien viene a levantarte (petición del usuario, 2026-09-18; antes la cámara
+	# se iba al compañero en cuanto te tumbaban y no se veía que podías moverte).
+	var want_h := _cam_height * (0.62 if pf.crouch or pf.downed else 1.0)
 	var follow := pf
-	if (team_mode != null or horde_mode != null) and not pf.alive():
+	if (team_mode != null or horde_mode != null) and pf.dead():
 		for o: Fighter in combat.fighters:
 			if o.team == pf.team and o.alive():
 				follow = o

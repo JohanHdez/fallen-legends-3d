@@ -146,6 +146,9 @@ func _show_label(f: Fighter) -> void:
 	elif f.dead():
 		f.label.text = "MUERTO"
 		f.label.modulate = DEAD_COLOR
+	# Sus señuelos, en el mismo fotograma: el porcentaje cambia en cada uno y si van por detrás se
+	# sabe cuál es la de verdad (petición vieja del usuario, fallo cazado el 2026-09-18).
+	combat.sync_decoy_labels(f)
 
 
 func restore_label(f: Fighter) -> void:
@@ -154,3 +157,4 @@ func restore_label(f: Fighter) -> void:
 		f.label.modulate = f.label.get_meta("name_color")
 		f.label.remove_meta("name_text")
 		f.label.remove_meta("name_color")
+		combat.sync_decoy_labels(f)

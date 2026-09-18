@@ -1,6 +1,6 @@
 ## Minimapa arriba a la derecha (petición del usuario, 2026-09-17): el terreno alrededor de lo que sigue
 ## la cámara, girado con ella (lo que tienes delante queda arriba). Tú en el centro con una flecha
-## blanca, tus compañeros en azul (naranja si están derribados), el borde del gas en violeta y, en rojo,
+## blanca, tus compañeros en azul (naranja con un aro que late si están derribados), el borde del gas en violeta y, en rojo,
 ## los enemigos que ve tu equipo: a menos de SIGHT de ti o de un compañero y sin esconderse; los marcados
 ## por romper un señuelo y quien acaba de atacar, estén donde estén. Lo que cae fuera del cuadro se pega
 ## al borde. En la Horda, las criaturas y el jefe igual. Se redibuja cada REFRESH s, no en cada fotograma.
@@ -139,6 +139,11 @@ func _draw() -> void:
 		var p := clamp_edge(to_map(f.pos().x - at.x, f.pos().z - at.z, yaw, ppm), half - 4.0)
 		draw_circle(c + p, 5.5, Color.BLACK)
 		draw_circle(c + p, 4.5, COL_DOWN if f.downed else COL_ALLY)
+		if f.downed:
+			# Aro que late: hay que ir a levantarlo (petición del usuario, 2026-09-18).
+			var pulse := 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) * 0.006)
+			draw_arc(c + p, 7.0 + 3.0 * pulse, 0.0, TAU, 20,
+				Color(COL_DOWN.r, COL_DOWN.g, COL_DOWN.b, 0.9 - 0.5 * pulse), 2.0, true)
 	if not me.dead():
 		var p := c + clamp_edge(to_map(me.pos().x - at.x, me.pos().z - at.z, yaw, ppm), half - 6.0)
 		var fwd := me.facing()

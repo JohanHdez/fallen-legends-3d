@@ -34,6 +34,15 @@ const BOSS_MAX := 4                    # tope de jefes a la vez
 # a más de esto de la cámara se quedan quietas de animación (se siguen moviendo por el mapa) y vuelven
 # a animarse al acercarse. Petición del usuario (2026-09-17): "los FPS mínimo 30, ideal 60".
 const ANIM_FAR := 30.0
+# Por dónde entra cada oleada (petición del usuario, 2026-09-18: "procurar que cuando empiece la
+# partida siempre sean en zonas diferentes porque normalmente la oleada está siendo siempre en los
+# pastos altos"). Antes las celdas de salida se fijaban UNA vez —en el móvil, un anillo alrededor de
+# donde empezabas— y todas las oleadas llegaban por el mismo lado. Ahora cada oleada escoge un
+# abanico alrededor del equipo y el abanico gira 137,5° por oleada (el ángulo de oro, el mismo truco
+# que reparte a los esqueletos de la emboscada): en diez oleadas no se repite dirección.
+const SECTOR_HALF := 1.05              # ±60° de abanico
+const SECTOR_TURN := 2.39996           # 137,5° de giro de una oleada a la siguiente
+const SECTOR_MIN := 4                  # con menos celdas que esto, el abanico no vale: se usa todo
 const CREATURE_DMG := 1.3
 const HP_PER_WAVE := 0.1
 const GAS_STAGES := 4
@@ -49,6 +58,7 @@ var left_to_spawn := 0
 var spawn_t := 0.0
 var _break_t := 0.0
 var spawn_cells: Array = []
+var wave_cells: Array = []           # las de ESTA oleada: el abanico por el que entra (sondas)
 var _grave_cells: Array = []
 var spawned := {}                    # cuántas han salido de cada especie (solo para --log)
 var boss_alive := false
@@ -167,13 +177,31 @@ func party_size() -> int:
 	return maxi(n, 1)
 
 
+## Dirección (radianes, en celdas x/y) por la que entra la oleada `w`.
+static func wave_angle(w: int) -> float:
+	return fposmod(float(w) * SECTOR_TURN, TAU)
+
+
+## Las celdas de `cells` que caen en el abanico de la oleada `w` visto desde `center`. Si el abanico
+## se queda sin celdas (el borde del mapa por ese lado no es suelo), vale cualquiera: más vale una
+## oleada por donde sea que una oleada que no sale.
+static func sector_cells(cells: Array, center: Vector2i, w: int) -> Array:
+	var a := wave_angle(w)
+	var out: Array = []
+	for c: Vector2i in cells:
+		var d := Vector2(c.x - center.x, c.y - center.y)
+		if d.length() < 0.5:
+			continue
+		if absf(wrapf(d.angle() - a, -PI, PI)) <= SECTOR_HALF:
+			out.append(c)
+	return out if out.size() >= SECTOR_MIN else cells
+
+
 func setup() -> void:
 	spawn_cells = MapBuilder.edge_cells(main._mb_grid)
 	_grave_cells = MapBuilder.cemetery_graves(main._mb_grid, main._mb_zones, Main.MAP_SEED)
 	_rebuild_flows()
 	wave = int(main._args.get("wave", "2" if main.touch else "1")) - 1
-	if main.touch and not main._args.has("near"):
-		spawn_cells = main._cells_around(main._cell_of(main.player.global_position), 9)
 	_start_wave()
 	print("horda lista: %d celdas de borde, %d tumbas" % [spawn_cells.size(), _grave_cells.size()])
 
@@ -183,6 +211,7 @@ func _start_wave() -> void:
 	if main.horde_mode != null:
 		main.horde_mode.on_wave_start()   # las muertas del equipo vuelven
 	left_to_spawn = wave_size(wave, party_size())
+	wave_cells = _wave_spawn_cells()
 	_break_t = 0.0
 	var n := boss_count(wave)
 	for i in n:
@@ -193,15 +222,42 @@ func _start_wave() -> void:
 		print("oleada %d de %d: %d criaturas" % [wave, WAVES, left_to_spawn])
 
 
+## Las celdas por las que sale ESTA oleada: el abanico que le toca, alrededor del equipo AHORA (no de
+## donde empezó la partida). En el móvil el abanico se recorta a un anillo cercano, o las criaturas
+## tardarían media oleada en llegar.
+func _wave_spawn_cells() -> Array:
+	if spawn_cells.is_empty():
+		return []
+	var center := main._cell_of(_team_center())
+	var pool := spawn_cells
+	if main.touch and not main._args.has("near"):
+		var near := main._cells_around(center, 9)
+		if near.size() >= SECTOR_MIN:
+			pool = near
+	return sector_cells(pool, center, wave)
+
+
+## El centro del equipo: la media de las leyendas que siguen en juego (la tuya, si no queda nadie).
+func _team_center() -> Vector3:
+	var acc := Vector3.ZERO
+	var n := 0
+	for f: Fighter in combat.fighters:
+		if f.team != Fighter.TEAM_HORDE and not f.dead():
+			acc += f.pos()
+			n += 1
+	return acc / float(n) if n > 0 else main.player.global_position
+
+
 ## El jefe de la oleada: una leyenda Rompemareas llevada por un bot del bando de la horda, como el
 ## jefe-leyenda del 2D (level.spawn_boss_legend), con sus tres poderes: mandoble cargado, Enganche que te
 ## arrastra y Ancla clavada. Antes era un zombi grande con su modelo que solo pegaba de cerca, y el
 ## usuario lo notó: "nunca usó sus poderes contra mí" (2026-09-17). Vida ×BOSS_LEGEND_HP de la de la
 ## leyenda, más un 20 % por compañero (horde.BOSS_HP_PER_PLAYER del 2D), y todo su daño ×1,5.
 func spawn_boss(count := 1) -> void:
-	if spawn_cells.is_empty():
+	var out_cells: Array = wave_cells if not wave_cells.is_empty() else spawn_cells
+	if out_cells.is_empty():
 		return
-	var c: Vector2i = spawn_cells[rng.randi() % spawn_cells.size()]
+	var c: Vector2i = out_cells[rng.randi() % out_cells.size()]
 	var f := combat.spawn_fighter(_legend_index(BOSS_LEGEND), Fighter.TEAM_HORDE, false,
 		main._cell_pos(c.x, c.y) + Vector3(0, 0.3, 0))
 	f.hp_mult = boss_hp_mult(party_size(), count)
@@ -311,16 +367,18 @@ func _bfs(goals: Array) -> Array:
 	return flow
 
 
-## Sale por los bordes del mapa o de una tumba, como en la Horda del juego.
+## Sale por el abanico de esta oleada (bordes del mapa, o un anillo cercano en el móvil) o de una
+## tumba, como en la Horda del juego.
 func spawn_zombie(at := Vector3.INF) -> void:
 	var placed := at != Vector3.INF     # sitio fijo: lo usan las dianas de prueba
-	if zombies.size() >= alive_cap(party_size()) or (not placed and spawn_cells.is_empty()):
+	var out_cells: Array = wave_cells if not wave_cells.is_empty() else spawn_cells
+	if zombies.size() >= alive_cap(party_size()) or (not placed and out_cells.is_empty()):
 		return
 	var from_grave := not placed and not _grave_cells.is_empty() and rng.randf() < 0.3
 	var c := Vector2i.ZERO
 	if not placed:
 		c = _grave_cells[rng.randi() % _grave_cells.size()] if from_grave \
-			else spawn_cells[rng.randi() % spawn_cells.size()]
+			else out_cells[rng.randi() % out_cells.size()]
 	# De una tumba solo sale lo que tiene sentido que estuviera enterrado.
 	var sp := _pick_species(from_grave)
 	var proto := main._proto_of(sp)

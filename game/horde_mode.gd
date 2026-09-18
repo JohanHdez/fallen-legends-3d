@@ -175,9 +175,10 @@ func _finish() -> void:
 	over = true
 	for f: Fighter in combat.fighters:
 		f.wish = Vector3.ZERO
-	print("[FIN] horda: %s en la oleada %d tras %.0f s · bajas %s" % [
+	print("[FIN] horda: %s en la oleada %d tras %.0f s · bajas/caídas/muertes %s" % [
 		"SUPERADA" if won else "el equipo cae", main.horde.wave, time,
-		", ".join(team().map(func(f: Fighter) -> String: return "%s %d/%d" % [f.display_name, _kills_of(f), f.deaths]))])
+		", ".join(team().map(func(f: Fighter) -> String: return "%s %d/%d/%d" % [
+			f.display_name, _kills_of(f), f.downs, f.deaths]))])
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	# La insignia de racha que estuviera en pantalla taparía los botones de la pantalla final.
 	if main._badge_tween != null:
@@ -199,6 +200,7 @@ func kills_of(f: Fighter) -> int:
 
 
 func restart() -> void:
+	Engine.set_meta("fl_seed", Main.new_seed())   # la revancha no repite el mismo sorteo
 	Engine.set_meta("fl_mode", "horda")
 	Engine.set_meta("fl_horde_team", size)
 	Engine.set_meta("fl_legend", main.pf.legend)

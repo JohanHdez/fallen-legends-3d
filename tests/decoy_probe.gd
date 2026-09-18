@@ -10,7 +10,9 @@
 ##  - sus señuelos llevan su mismo letrero y, si está derribada, la misma animación de arrastrarse y
 ##    a su paso (petición del usuario, 2026-09-17). Casi nunca cae con señuelos fuera, así que
 ##    --down-decoys la tumba la primera vez que tiene uno y exige haberlo comprobado un rato;
-##  - hay al menos una marca (los bots disparan a los señuelos, así que alguno se rompe).
+##  - hay al menos una marca (los bots disparan a los señuelos, así que alguno se rompe);
+##  - pegar a un clon de la Fiesta que AGUANTA el golpe también delata (petición del usuario,
+##    2026-09-18: "cuando le pegue así sea una vez a los clones debo ser marcado").
 extends Node
 
 var main: Node
@@ -31,6 +33,9 @@ var _lag := {}               # id del cuerpo del señuelo -> [qué no copia, fot
 var _born := {}              # id del cuerpo de un señuelo -> [segundo en que salió, modo, vida que le quedaba]
 var _lifetimes := {1: [], 2: []}   # modo (1 fiesta, 2 señuelo) -> segundos que duró cada uno
 var _broken := {1: 0, 2: 0}        # modo -> cuántos se rompieron antes de tiempo
+var _decoy_hp := {}                # id del cuerpo del señuelo -> vida del fotograma anterior
+var _hits_alive := 0               # golpes a un clon que NO lo deshicieron...
+var _marks_alive := 0              # ...y los que delataron igualmente a alguien (usuario, 2026-09-18)
 
 
 func _ready() -> void:
@@ -113,6 +118,7 @@ func _physics_process(delta: float) -> void:
 						o.display_name, f.display_name, age, o.pos().distance_to(f.pos()),
 						aimed.display_name if aimed != null else String(b.target.get("kind", "nadie"))])
 	_check_decoys(delta)
+	_check_marks_on_hit()
 	_track_lifetimes()
 	var rules: TeamMatch = main.team_mode.rules
 	if rules.state == "over" or _t >= _secs:
@@ -180,6 +186,31 @@ func _check_decoys(delta: float) -> void:
 		_downed_decoy_t += delta
 
 
+## Un golpe que NO deshace al clon tiene que marcar igual a quien lo dio (petición del usuario,
+## 2026-09-18). Se mira la vida de cada señuelo: si baja y sigue vivo, alguien del otro equipo debe
+## estar marcado para el suyo.
+func _check_marks_on_hit() -> void:
+	var live := {}
+	for al in main.combat.allies:
+		if al["kind"] != "decoy":
+			continue
+		var id: int = (al["node"] as Node3D).get_instance_id()
+		live[id] = true
+		var hp := float(al["hp"])
+		var was := float(_decoy_hp.get(id, hp))
+		_decoy_hp[id] = hp
+		if hp >= was - 0.01 or hp <= 0.0:
+			continue
+		_hits_alive += 1
+		for o: Fighter in main.combat.fighters:
+			if o.team != int(al.get("team", -1)) and o.marked_for(int(al.get("team", -1))):
+				_marks_alive += 1
+				break
+	for id in _decoy_hp.keys():
+		if not live.has(id):
+			_decoy_hp.erase(id)
+
+
 ## Cuánto duran de verdad los señuelos (la Fiesta dice 20 s, pero se los pueden romper antes).
 func _track_lifetimes() -> void:
 	var seen := {}
@@ -229,8 +260,12 @@ func _finish() -> void:
 		_problems.append("solo %.1f s con ella derribada y señuelos (tumbada: %s)" % [_downed_decoy_t, _forced])
 	if _marks == 0:
 		_problems.append("nadie quedó marcado en %.0f s: romper un señuelo no marca" % _t)
+	if _hits_alive > 0 and _marks_alive == 0:
+		_problems.append("%d golpes a clones que aguantaron y ninguno delató a nadie" % _hits_alive)
 	print("[SONDA] señuelos: %d marcas, %.1f s marcados en total, %.1f s con ella derribada y señuelos, partida de %.0f s" % [
 		_marks, _marked_time, _downed_decoy_t, _t])
+	print("[SONDA] golpes a clones que aguantaron: %d, de ellos %d con alguien marcado (%d marcas de señuelo en total)" % [
+		_hits_alive, _marks_alive, main.combat.decoy_marks])
 	print("[SONDA] duran: fiesta %.1f s de media (%d clones, %d rotos antes de tiempo) · señuelo %.1f s (%d, %d rotos)" % [
 		_mean(_lifetimes[1]), (_lifetimes[1] as Array).size(), _broken[1],
 		_mean(_lifetimes[2]), (_lifetimes[2] as Array).size(), _broken[2]])

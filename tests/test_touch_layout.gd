@@ -28,5 +28,9 @@ func _init() -> void:
 	for other in [[Vector2.ZERO, Main.MAIN_SIDE / 2.0], [Vector2(-170.0, 20.0), Main.ABILITY_SIDE / 2.0], [Vector2(-60.0, -165.0), Main.ABILITY_SIDE / 2.0]]:
 		var gap: float = Main.ORDERS_OFFSET.distance_to(other[0]) - Main.ORDERS_RADIUS - float(other[1])
 		_check(gap >= 8.0, "el botón de órdenes queda a %.0f px de un botón de habilidad" % gap)
+	# Correr en el móvil (2026-09-18): el joystick al borde. Tiene que quedar por encima de la zona
+	# muerta y por debajo de 1, o no se llegaría nunca.
+	_check(Main.JOY_RUN > Main.DEAD_ZONE and Main.JOY_RUN < 1.0, "el umbral de correr (%.2f) es alcanzable" % Main.JOY_RUN)
+	_check(Main.JOY_RUN >= 0.8, "y no se corre sin querer al andar (%.2f)" % Main.JOY_RUN)
 	print("test_touch_layout: %s (%d fallos)" % ["OK" if failures == 0 else "FALLO", failures])
 	quit(1 if failures > 0 else 0)

@@ -23,8 +23,13 @@ func _draw() -> void:
 	var jc: Vector2 = main.joy_center()
 	_round(TEX.underlay, jc, main.JOY_RADIUS, Color(1, 1, 1, 0.85))
 	var knob: Vector2 = jc + main._joy_vec * main.JOY_RADIUS
-	_round(TEX.move, knob, main.KNOB_RADIUS * 1.15,
-		Color(1, 1, 1, 1.0 if main._joy_idx >= 0 else 0.85))
+	# Al borde se CORRE (main.JOY_RUN): el aro amarillo es lo único que lo dice, porque en el móvil no
+	# hay tecla Mayúsculas (2026-09-18).
+	var running: bool = main._joy_vec.length() >= main.JOY_RUN
+	if running:
+		draw_arc(jc, main.JOY_RADIUS - 2.0, 0.0, TAU, 48, Color(1.0, 0.85, 0.35, 0.85), 4.0, true)
+	_round(TEX.move, knob, main.KNOB_RADIUS * (1.3 if running else 1.15),
+		Color(1.0, 0.92, 0.6) if running else Color(1, 1, 1, 1.0 if main._joy_idx >= 0 else 0.85))
 
 	for b in main.button_rects():
 		if int(b["idx"]) == main.CROUCH_BTN:
@@ -123,22 +128,30 @@ func _crouch(b: Dictionary, font: Font) -> void:
 	var c: Vector2 = b["c"]
 	var r: float = b["r"]
 	var on: bool = main._touch_crouch
+	# Con un compañero derribado a tus pies, el botón se pone VERDE y avisa de que sirve para
+	# levantarlo (petición del usuario, 2026-09-18: no encontraba cómo reanimar).
+	var lift: bool = main.can_revive_now()
 	# Fondo oscuro propio: los demás botones llevan un icono de color y este solo una flecha, que
 	# sobre la hierba no se distinguía.
 	draw_circle(c, r * 0.92, Color(0.35, 0.28, 0.08, 0.85) if on else Color(0.05, 0.06, 0.1, 0.6))
 	_round(TEX.underlay, c, r, Color(1.3, 1.1, 0.6, 0.95) if on else Color(1, 1, 1, 0.85))
 	if on:
 		draw_arc(c, r - 3.0, 0.0, TAU, 40, Color(1.0, 0.85, 0.35, 0.95), 4.0, true)
+	if lift:
+		# Late, para que se vea entre la pelea.
+		var pulse := 0.55 + 0.45 * sin(float(Time.get_ticks_msec()) * 0.007)
+		draw_arc(c, r + 5.0, 0.0, TAU, 44, Color(0.4, 1.0, 0.5, 0.35 + 0.6 * pulse), 5.0, true)
 	var arrow := "▼"
 	var sz := font.get_string_size(arrow, HORIZONTAL_ALIGNMENT_LEFT, -1, 30)
 	draw_string_outline(font, c + Vector2(-sz.x * 0.5, 11.0), arrow, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, 5, Color(0, 0, 0, 0.9))
 	draw_string(font, c + Vector2(-sz.x * 0.5, 11.0), arrow, HORIZONTAL_ALIGNMENT_LEFT, -1, 30,
 		Color(1.0, 0.9, 0.5) if on else Color(1, 1, 1))
-	var sub: String = b["name"]
+	var sub: String = "LEVANTAR" if lift else String(b["name"])
 	var ss := font.get_string_size(sub, HORIZONTAL_ALIGNMENT_CENTER, -1, 13)
 	var ty: float = c.y + r + 15.0
 	draw_string_outline(font, Vector2(c.x - ss.x / 2.0, ty), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, 4, Color(0, 0, 0, 0.9))
-	draw_string(font, Vector2(c.x - ss.x / 2.0, ty), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.95))
+	draw_string(font, Vector2(c.x - ss.x / 2.0, ty), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
+		Color(0.5, 1.0, 0.6) if lift else Color(1, 1, 1, 0.95))
 
 
 func _round(tex: Texture2D, center: Vector2, radius: float, tint: Color) -> void:

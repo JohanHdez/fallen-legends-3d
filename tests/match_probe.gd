@@ -38,7 +38,8 @@ func _ready() -> void:
 		_moved[f.id] = 0.0
 		_hp0[f.id] = f.hp()
 		_prev_hp[f.id] = f.hp()
-		var want := 0 if String(f.data()["id"]) == "ilusionista" else 3
+		# Lo que diga la tabla: la Ilusionista sin límite y cada una la suya (el Rey liche, 4).
+		var want := int(LegendData.PVP_AMMO.get(String(f.data()["id"]), {}).get("n", 0))
 		if f.ammo_max != want:
 			_rules_bad.append("%s con %d de munición máxima (debería %d)" % [f.display_name, f.ammo_max, want])
 

@@ -68,6 +68,25 @@ el derribado **gatea de verdad** (`Crawl_Fwd/_Bwd/_Left/_Right/_Idle`, de la bib
 levanta se arrodilla (`Fixing_Kneeling`). Medido con bots
 (4v4): 12 derribos, 4 levantados (12,6 s de media derribados) y 2 muertos desangrados.
 
+**Cómo se ve que hay que levantar a alguien** (petición del usuario, 2026-09-18: "no veo cómo
+reanimar a mis compañeros caídos"). Antes solo había una línea en la Horda y en PvP nada. Ahora:
+
+- un **aviso en el centro** que dice a quién, a cuántos metros y **qué botón**: "Clérigo está
+  derribado a 6 m · agáchate (Ctrl) a su lado", y a su lado "Clérigo está a tus pies · agáchate
+  (el botón ▼) para levantarlo" (`Revive.hint`, probado en `tests/test_revive.gd`). En el móvil
+  nombra el botón, en teclado la tecla. También en **PvP**, que no lo tenía;
+- el **botón de agacharse se enciende en verde** y pone **LEVANTAR** cuando lo tienes al alcance;
+- en el **minimapa**, el compañero derribado lleva un **aro naranja que late**.
+
+**Derribado sigues jugando**: la cámara **ya no se va a un compañero** al caer (eso solo pasa si
+mueres de verdad). Se baja a la altura del suelo y te quedas tú, arrastrándote para esconderte
+mientras alguien viene (petición del usuario, 2026-09-18: "aún estoy vivo, debería tener la
+oportunidad de gatear o cubrirme").
+
+**Caídas y muertes son cosas distintas** y las pantallas finales (Horda y PvP) tienen ya las tres
+columnas: **Bajas**, **Caídas** (veces que te derribaron, aunque te levantaran) y **Muertes** (las
+que nadie llegó a tiempo). `Fighter.downs`, `TeamMatch.on_down`.
+
 **Las 10 oleadas y los jefes** (esquema del usuario, 2026-09-17): la Horda dura **10 oleadas** y
 superarlas es **ganar** (antes no acababan nunca). Los **Rompemareas** empiezan en la **oleada 5** y
 van a más: **1 en la 5, 2 en la 6, 3 en la 7 y 4 de la 8 a la 10**. Cuando salen varios, la vida de
@@ -134,16 +153,57 @@ Reglas por equipos (a petición del usuario, 2026-09-16):
   en la Horda.
 - Leyendas: la tuya, y las de los bots sin repetir dentro de un equipo (entre equipos sí; en el
   duelo, contra otra distinta). Nombres encima de la barra, en azul los tuyos y en rojo los rivales.
+- **Correr en el móvil**: llevando el joystick al **borde** (el aro del joystick se pone amarillo).
+  Hasta ahora correr era solo Mayúsculas, así que en táctil no existía; con los bots corriendo, el
+  móvil se quedaba sin la única forma de alcanzar a nadie y de escapar (2026-09-18).
 - Los bots (`game/bot_brain.gd`, adaptado del 2D) buscan al rival **visible** más cercano, pelean a
-  la distancia de su leyenda, huyen con poca vida, vuelven al área limpia si les pilla el gas y
+  **la distancia de su propia básica** (el 75 %: el Clérigo a 8 m, no a los 4,7 de la tabla del 2D,
+  con un golpe que llega a 10,6) y **corren cuando persiguen, cuando huyen, cuando salen del gas y
+  cuando van a levantar a un compañero** (antes ningún bot usaba `run`, así que un cuerpo a cuerpo no
+  alcanzaba jamás a uno que retrocediera). Los dos cambios son del 2026-09-18 y van juntos a
+  propósito: el primero solo, medido en 42 duelos, arreglaba al Clérigo (31 % → 77 % de duelos
+  ganados) pero hundía al Rompemareas (85 % → 23 %) porque nadie podía acercársele. Huyen con poca
+  vida, vuelven al área limpia si les pilla el gas y
   caminan por la rejilla con A*. Agacharte en la hierba alta y la invisibilidad del Ilusionista les
   despistan, y sus señuelos les engañan. Como haría una persona, **rodean lo que el rival dejó puesto
   y se ve** (trampas, balizas, nubes, tormentas y espinas) y salen si les pilla dentro; antes lo
   pisaban a ciegas y las trampas hacían el 36 % del daño. Con munición guardan el último disparo
   para cuando el rival está cerca (a menos del 70 % del alcance).
 - **Pausa**: botón ☰ arriba a la izquierda o tecla **P**: Seguir, Reiniciar o volver al Menú (vale
-  también en la Horda). Al acabar la partida, pantalla final con rondas, bajas y caídas de cada
-  leyenda, y botones Revancha y Menú.
+  también en la Horda). Al acabar la partida, pantalla final con rondas y, por leyenda, bajas,
+  caídas y muertes, con botones Revancha y Menú.
+
+## Balance: 42 duelos de bots, medidos tres veces (2026-09-18)
+
+Petición del usuario ("revisa cómo balancear más y generar una mejor experiencia"). Cada leyenda
+juega **1v1 contra bots con seis semillas** (`--mode=1v1 --legend=N --autoplay --seed=S`, el rival lo
+sortea la semilla), y el mismo torneo se corre sobre el commit anterior en un árbol de trabajo
+aparte, para saber qué mueve cada cambio:
+
+| Leyenda | antes (a54ad37) | tras los ajustes de habilidades | + bots peleando a su alcance | + bots que corren |
+|---|---|---|---|---|
+| Rey liche | 71 % | 100 % | 100 % | **86 %** |
+| Clérigo | 31 % | 31 % | 77 % | **69 %** |
+| Ilusionista | 67 % | 67 % | 67 % | **67 %** |
+| Tormentero | 67 % | 56 % | 56 % | **44 %** |
+| Rompemareas | 77 % | 85 % | 23 % | **38 %** |
+| Trasgo Nox | 17 % | 11 % | 33 % | **33 %** |
+| Caballero esqueleto | 33 % | 33 % | 0 % | **33 %** |
+
+Lo que enseña la tabla:
+
+- **El Trasgo Nox ya era el más flojo en duelo antes de tocar nada** (17 %), no es de los cambios de
+  esta tanda. Con el cerebro arreglado sube a 33 %.
+- **Hacer que los de distancia peleen a su alcance, solo, rompe el juego**: arregla al Clérigo y
+  hunde a los cuerpo a cuerpo (Rompemareas 85 % → 23 %, Caballero 33 % → 0 %). Van juntos con que el
+  que persigue **corra**.
+- **El Rey liche se pasó de fuerte** con las mejoras que pidió el usuario: en duelos por parejas
+  (`--foe=N`, cada leyenda contra las otras seis, dos semillas) ganaba **10 de 12**. Devolviéndole el
+  daño del 2D (26 en vez de 28) y la munición a 3/1,0 se queda en **8 de 12**, y los dos que pierde
+  son contra los cuerpo a cuerpo: el rey de los esqueletos domina de lejos y cae si le entran. La
+  cadencia de 0,5 s y los esqueletos fuertes, que es lo que pidió, se quedan.
+- Sigue siendo balance **de bots**: cuando juega una persona, las leyendas que dependen de colocar
+  cosas (Trasgo Nox) valen más de lo que dice la tabla.
 
 ## Qué hay ahora
 
@@ -170,6 +230,15 @@ Persiguen a la leyenda del equipo más cercana con un **campo de flujo** BFS sob
 sola búsqueda cada 0,4 s, con todas las leyendas vivas de fuente, sirve para todos, en vez de una
 ruta por bicho). Se separan entre ellos, muerden al alcance y la oleada siguiente sale 4 s después de
 limpiar la anterior.
+
+**Cada oleada entra por un lado distinto** (petición del usuario, 2026-09-18: "procurar que...
+siempre sean zonas diferentes, porque normalmente la oleada está siendo siempre en los pastos
+altos"). Antes las celdas de salida se fijaban **una vez** —en el móvil, un anillo alrededor de donde
+empezabas— y las diez oleadas llegaban por el mismo sitio. Ahora, al empezar cada oleada, se toma el
+**centro del equipo de ese momento** y se abre un **abanico de ±60°** que **gira 137,5° por oleada**
+(el ángulo de oro): en diez oleadas no se repite dirección y, como el centro se recalcula, tampoco
+repite sitio si te has movido. Si por ese lado no hay suelo, valen todas las celdas. `Horde.wave_angle`
+y `Horde.sector_cells`, probados en `tests/test_horde_scaling.gd`.
 
 **El jefe** (oleada 5 y sus múltiplos, o `--boss`) es una **leyenda Rompemareas llevada por un bot del
 bando de la horda**, como el jefe-leyenda del 2D: usa sus poderes (mandoble cargado, Enganche que te
@@ -219,6 +288,14 @@ A petición del usuario, **cada golpe suyo levanta polvo** (`"dust"`) y el **Man
 tenga delante, de hombro a hombro. El abanico de polvo se dibuja con esa misma apertura, así que se
 ve exactamente dónde ha pegado — que es lo que hace legible un área de golpe grande. El aura del
 Ancla clavada levanta polvo igual, porque también es un golpe suyo.
+
+**El Ancla clavada se clava DONDE APUNTAS y ya no lo deja plantado** (petición del usuario,
+2026-09-18: "cuando el Rompemareas ponga su definitiva no dejarlo estático, incluso él puede elegir
+dónde atraer a los enemigos"). Antes se clavaba a sus pies con `"root"` y se pasaba los 5 s sin poder
+moverse: te enterrabas con ella. Ahora el ancla sale volando hasta **8,1 m** (`"rng"` 520 px), se
+queda **clavada en el suelo a la vista**, y su remolino tira de todo enemigo en **4,7 m** (`"rad"`
+300 px) y le pega 26 cada 0,8 s durante 5 s, mientras él **sigue peleando** con su −30 % de daño
+recibido. Los bots la usan en cuanto tienen al objetivo dentro del alcance.
 
 Las cifras, tal cual del `.tres`: **2,7 m de radio** (170 px) y 180°; **mantener la tecla** lo carga
 hasta ×1,9 de radio (5,1 m) y ×2,1 de daño, y entonces es un **giro de 360°**. Preaviso de 0,3 s, el
@@ -355,15 +432,23 @@ que cualquier otra habilidad puede envenenar añadiéndolos.
 **Medido** (el Clérigo en los 4 modos × 4 semillas, 16 partidas por versión): su daño con la básica
 sube de **1.124 a 1.630 por partida** (+45 %; la toxina pide 910 por partida, parte se la comen
 inmunidades y objetivos que no son leyendas). **Sus victorias no se mueven**: 42 % antes, 40 %
-después. El cuello de botella no es su daño, sino que en partidas de bots muere mucho (K/D 19/27) y
-su cerebro pelea a 4,7 m pudiendo disparar a 10,6 (`BotBrain.DESIRED_RANGE`). Cuando lo llevas tú,
-la toxina es daño limpio que además impide que el rival empiece a regenerar.
+después. El cuello de botella no era su daño, sino que en partidas de bots moría mucho (K/D 19/27)
+porque su cerebro peleaba a 4,7 m pudiendo disparar a 10,6. **Eso se arregló el 2026-09-18**
+(`BotBrain.desired_range`): peleando a su alcance pasa del **31 % al 69 %** de duelos ganados. Cuando
+lo llevas tú, la toxina es daño limpio que además impide que el rival empiece a regenerar.
 
 ## Esporas del Clérigo
 
 Cuánto quitan, medido en partidas de bots (2v2, vida ×3): **~250 de vida por lanzamiento** con
 varios infectados, y **~175 a una leyenda sola** (un cuarto de sus 720). Es su definitiva, así que
 sale 2-5 veces por partida.
+
+**Más ancha y con apuntado asistido** (petición del usuario, 2026-09-18: "el Clérigo debe tener un
+área más grande para las esporas y automáticamente señala los enemigos más cercanos"): el radio pasa
+de 190 px (3,0 m) a **300 px (4,7 m)** —la nube se esquivaba andando— y la habilidad lleva
+`"snap": true`, así que **el punto apuntado se pega al enemigo que haya a menos de 4 m** de él
+(`Combat.snap_to_foe`). En el móvil se apunta arrastrando el dedo a ojo y la nube caía al lado; vale
+igual para los bots.
 
 Con la mecánica real de `player.gd` (SPORE_*): infecta al apuntado y a los de alrededor, cada
 infectado lleva **cuatro bultos pegados al cuerpo**, el daño empieza en 10/s y sube +1,5 por
@@ -386,8 +471,16 @@ Petición del usuario (2026-09-17; `game/minions.gd`). Con esqueletos vivos apar
 | **Reagrupar** | le siguen en dos anillos (4 a 2 m y 6 a 3,5 m), separados unos de otros; golpean a quien tengan a 2 m, sin perseguir |
 | **Emboscada** | van al punto, se reparten en 3 m y **se entierran**: medio hundidos, sin chocar, translúcidos para tu equipo e **invisibles para el otro bando** (ni bots, ni teledirigidos, ni zonas, ni criaturas los ven). **Si un enemigo pasa a 4 m de cualquiera, salen todos y pasan a Atacar** |
 
+**Más fuertes desde 2026-09-18** (petición del usuario: "los esqueletos son muy débiles, no golpean
+lo suficientemente rápido"): pegan **20 cada 0,85 s** (antes 18 cada 1,4: +65 % de daño sostenido),
+corren a **3,6 m/s** (antes 3,1, y no alcanzaban a nadie) y tienen **100 de vida** en vez de los 60 de
+un señuelo (×3 por equipos: 300). Y su Rey aguanta más de lejos: el **Rayo gélido** sale cada **0,5 s**
+por 28 de daño (antes 0,7 por 26), con **4 balas** y recarga de 0,9 s en vez de 3 y 1,15, y **Alzar
+esqueleto** vuelve cada **4,5 s** (antes 6). Son desviaciones del 2D, todas anotadas en
+`data/legend_data.gd` y en `game/minions.gd`.
+
 Antes iban en línea recta al enemigo visible a menos de 18 m (se atascaban en las rocas) y, sin nadie,
-se quedaban quietos donde nacían. Ahora andan a 3,1 m/s por la rejilla, los nuevos obedecen la orden
+se quedaban quietos donde nacían. Ahora andan por la rejilla, los nuevos obedecen la orden
 puesta, y por equipos tienen vida ×3 como las leyendas (180). Los bots Rey liche mandan Atacar
 mientras pelean y Reagrupar cuando huyen; no emboscan. `tests/minion_probe.gd`: Atacar llega a una
 diana a 20 m en 5,6 s, Reagrupar los deja a 2,9 m de media tras andar 20 m, la emboscada los entierra
@@ -403,18 +496,24 @@ el enemigo no sepa cuál eres. Son **inmunes a las esporas**.
 **Si la derriban, sus señuelos también lo parecen** (petición del usuario, 2026-09-17): llevan **su
 mismo letrero** (el nombre, y "¡DERRIBADO! N s" cuando cae), **su misma animación** —también la de
 arrastrarse—, **se arrastran a su paso** (los de largo dejan de correr) y **se quedan sin barra de
-vida** igual que ella. Sin eso, el letrero y la barra decían al momento cuál era la de verdad.
+vida** igual que ella. El letrero se copia **en el mismo fotograma** en que ella lo cambia
+(`Combat.sync_decoy_labels`, llamado desde `ReviveSystem`): mientras la levantan pone el porcentaje y
+cambia en cada fotograma, así que copiarlo solo en el tic del mundo dejaba a los clones uno por
+detrás ("levantando 4 %" contra "5 %") y eso decía cuál era la de verdad. Sin eso, el letrero y la barra decían al momento cuál era la de verdad.
 
 **Cuánto aguantan**: un solo golpe disipa el **Señuelo** (la táctica), como en el 2D. Los **cinco
 clones de la Fiesta**, en cambio, tienen **vida ×3 como las leyendas** (decisión del usuario,
 2026-09-17: querían que duraran sus 20 s; con un golpe duraban 5,5 s de media). Medido ahora:
 **14,6-17,7 s de media** por clon.
 
-**Romper un señuelo marca a quien lo rompió** (idea del usuario, 2026-09-16; el 2D no lo tiene):
-durante **5 s** el equipo de la Ilusionista lo ve con un **contorno rojo a través de muros, rocas y
-hierba**, no puede esconderse agachado y los bots de ese equipo van a por él. Cuenta también si lo
-rompe su trampa, su zona o su esbirro; no cuenta si el señuelo caduca o si ella se intercambia con
-él. Romper otro vuelve a 5 s, no suma. Si te marcan a ti, un aviso rojo arriba te lo dice con la
+**Pegar a un señuelo marca a quien le pegó** (idea del usuario, 2026-09-16; el 2D no lo tiene), y
+desde 2026-09-18 **basta el primer golpe, aunque el clon aguante**: con los clones duros de la Fiesta
+se podía tantear cuál era la buena a golpes sin pagarlo ("cuando le pegue así sea una vez a los clones
+debo ser marcado"). Durante **5 s** el equipo de la Ilusionista lo ve con un **contorno rojo a través
+de muros, rocas y hierba**, no puede esconderse agachado y los bots de ese equipo van a por él. Cuenta
+también si le pega su trampa, su zona o su esbirro; no cuenta si el señuelo caduca o si ella se
+intercambia con él. Medido con `tests/decoy_probe.gd`: **205 golpes a clones que aguantaron, 205 con
+el atacante marcado**. Romper otro vuelve a 5 s, no suma. Si te marcan a ti, un aviso rojo arriba te lo dice con la
 cuenta atrás. El contorno (`fx/mark_fx.gd`) son dos pasadas en `material_overlay`: la silueta
 escribe en el stencil sin mirar la profundidad y el borde, engordado en píxeles de pantalla, se
 pinta solo fuera de ella. Funciona en Forward+ y en Compatibilidad (móvil).
@@ -485,6 +584,20 @@ de barras rojas y no se veía la pelea. La del jefe no se esconde, que es el obj
 igual a `_make_bar` y a `_set_bar`: la segunda la usa para recolocar el relleno, así que si no
 coinciden la barra se vacía descentrada.
 
+## Corte de hacha del Caballero
+
+Petición del usuario (2026-09-18): "es muy lenta, cuando lo coge el gas es peor de lenta; debería
+poder escapar usando esa habilidad muy rápido, y activársele cada 5 segundos, y la cadencia y área de
+daño deben aumentar". Antes la carga llevaba `"sync"`: duraba **lo que la animación** (1,57 s para
+10,9 m ≈ 7 m/s, un paseo con el hacha por delante). Ahora:
+
+- manda `spd` = **1500 px/s (23,4 m/s)**: los mismos 10,9 m en **0,47 s**, con `Sword_Dash` acelerada
+  al triple (`Combat.cast_dash` recorta la velocidad de animación a 0,5-3×);
+- **recarga 5 s** (antes 7);
+- **radio 130 px (2,0 m)** en vez de 70 (1,1 m) y **32 de daño** en vez de 25;
+- **la carga le quita la ralentización** (`slow_t = 0`): con el gas Nox encima o dentro de la zona era
+  todavía más lenta, justo cuando la quieres para salir de ahí.
+
 ## Guardia del Caballero
 
 El aro blanco bajo los pies se cambió por una **burbuja de escudo**: el esqueleto no lleva escudo
@@ -510,7 +623,11 @@ alcanzados en ~1,8 min; petición del usuario, 2026-09-17: "no es necesario que 
 en el modo zombie"); por equipos sigue cerrando hasta 10 m.
 
 Dentro del gas: 7 de daño por segundo, y la pantalla se **tiñe de violeta por los bordes** con un
-latido. Es viñeta y no un rectángulo plano a propósito: teñir el centro mientras te están matando
+latido. **Excepción: el Trasgo Nox y su equipo respiran** (petición del usuario, 2026-09-18: "a él ni
+al equipo le debe afectar el gas"). Es el que pelea con gas, así que lleva máscaras para los suyos:
+mientras siga en la partida —vivo o derribado— nadie de su equipo sufre la zona, el velo violeta no
+aparece y el HUD dice "en el gas (tu máscara aguanta)". Las nubes de las habilidades ya respetaban a
+los aliados por equipo, así que esto solo cambia la zona. `Combat.gas_immune`. Es viñeta y no un rectángulo plano a propósito: teñir el centro mientras te están matando
 es lo contrario de ayudar.
 
 Dos cosas que costaron una vuelta cada una:
@@ -527,8 +644,8 @@ Sondas: `--zonewait=N` acorta la espera y `--zonefast=N` acelera el cierre.
 
 Arriba a la derecha, un cuadro de 190 px (petición del usuario, 2026-09-17) con el terreno alrededor
 de tu leyenda: **gira con la cámara**, así que lo que tienes delante queda arriba. Tú eres la **flecha
-blanca** del centro (naranja si te derriban), tus compañeros **puntos azules** (naranjas si están
-derribados), el borde del área limpia es el **aro violeta**, y los enemigos salen en **rojo**:
+blanca** del centro (naranja si te derriban), tus compañeros **puntos azules** (naranjas **con un aro que late** si están
+derribados: hay que ir a levantarlos), el borde del área limpia es el **aro violeta**, y los enemigos salen en **rojo**:
 
 - los que **ve tu equipo**: a 23,4 m o menos de ti o de un compañero que no haya muerto (lo mismo que
   ve un bot) y sin esconderse (agachado en hierba alta o invisible por la Fiesta de clones no sale);
@@ -624,7 +741,7 @@ jugar: `--badge=3`.
 | Tecla | Qué hace |
 |---|---|
 | WASD | mover (relativo a la cámara) |
-| Shift | correr |
+| Shift | correr (en el móvil, el joystick al borde: el aro se pone amarillo) |
 | ratón | girar la cámara |
 | rueda | acercar / alejar |
 | clic izquierdo o Q | básica (mantener: carga el mandoble del Rompemareas) |
@@ -693,8 +810,9 @@ Ver `assets/CREDITS.txt`. Resumen de lo que ata:
 --down-player=S (horde_probe) te tumba a ti a los S s, para probar la derrota sin depender del balance
 --down-decoys   (decoy_probe) derriba a la Ilusionista en cuanto tenga un señuelo, para ver si la copian
 --expect-defeat (horde_probe) la partida tiene que acabar en derrota antes de --secs
---seed=N        cambia el sorteo de la partida (leyendas, decoración) sin mover el mapa: sirve para medir
-                varias partidas distintas del mismo escenario (sin el flag, la de siempre: 1234)
+--seed=N        cambia el sorteo de la partida (leyendas, decoración, dónde sales) sin mover el mapa;
+                sin el flag manda la semilla del menú, y sin menú —pruebas y sondas— la de siempre: 1234
+--foe=N         (por equipos) fija la leyenda del equipo rival: sirve para torneos por parejas
 --rounds=N      rondas para ganar la partida (por defecto 2: al mejor de 3)
 --roundtime=S   tope de una ronda (por defecto 150 s)
 --autocast      en la Horda, lanza solo lo que esté listo hacia la criatura más cercana
@@ -709,8 +827,17 @@ godot --headless --fixed-fps 60 --path . -- --mode=4v4 --autoplay --log --probe=
 ```
 
 `--log` imprime además el reparto de especies: `vivos` por tipo y `salidas` acumuladas. Ojo al
-leerlo: **el `rng` va con semilla fija** (`MAP_SEED`, para que el mapa salga siempre igual), así que
-dos ejecuciones con los mismos argumentos repiten la misma tirada. Dos muestras iguales no son dos
+leerlo: **en headless el `rng` va con semilla fija** (`MAP_SEED`), así que dos ejecuciones con los
+mismos argumentos repiten la misma tirada.
+
+**Jugando, en cambio, cada partida es distinta** (petición del usuario, 2026-09-18): al pulsar JUGAR,
+al reiniciar desde la pausa y en la Revancha se guarda una **semilla nueva** (`Main.new_seed()`,
+sacada del reloj; el juego nunca llama a `randomize()`). El **dibujo del mapa no cambia** —sale de
+`MAP_SEED`, y los eriales de `_terrain_rng`— pero sí **las manchas de hierba, la decoración, el
+reparto de leyendas y la celda donde empiezas** en la Horda, sorteada entre las que hay a 7 celdas
+del centro; con ella se mueve también por dónde entra la primera oleada. Las pruebas y las sondas no
+pasan por el menú, así que siguen con 1234 y sus trazas no se mueven (comprobado: dos ejecuciones
+iguales siguen dando la misma traza). Dos muestras iguales no son dos
 muestras: para comprobar de verdad un sorteo por pesos hay que hacerlo aparte, con `randomize()`.
 
 ## Cosas que se aprendieron montándolo

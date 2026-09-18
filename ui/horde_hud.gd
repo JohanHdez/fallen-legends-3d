@@ -113,18 +113,15 @@ func _process(_delta: float) -> void:
 		var lifting := hm.revive.helping(pf)
 		if lifting != null:
 			_down.text = "Levantando a %s… %d %%" % [lifting.display_name, int(lifting.revive_progress * 100.0)]
-		elif _someone_down():
-			_down.text = "Un compañero está derribado: agáchate a su lado para levantarlo"
+		else:
+			# El aviso dice el nombre, los metros que faltan y QUÉ BOTÓN es (usuario, 2026-09-18).
+			var mate := hm.main.downed_mate()
+			if mate != null:
+				_down.text = Revive.hint(pf.pos().distance_to(mate.pos()), pf.crouch,
+					hm.main.touch, mate.display_name)
 
 
-func _someone_down() -> bool:
-	for f: Fighter in hm.team():
-		if f.downed:
-			return true
-	return false
-
-
-## Pantalla final: oleada alcanzada, tiempo, bajas y caídas de cada leyenda, y botones.
+## Pantalla final: oleada alcanzada, tiempo, bajas, caídas y muertes de cada leyenda, y botones.
 func show_end() -> void:
 	if _end != null:
 		return
@@ -151,15 +148,17 @@ func show_end() -> void:
 	why.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(why)
 	var grid := GridContainer.new()
-	grid.columns = 3
+	# Caídas (veces que la derribaron) y muertes (las que nadie levantó a tiempo) van por separado:
+	# el usuario echaba de menos las segundas (2026-09-18).
+	grid.columns = 4
 	grid.add_theme_constant_override("h_separation", 28)
 	col.add_child(grid)
-	for txt in ["Leyenda", "Bajas", "Caídas"]:
+	for txt in ["Leyenda", "Bajas", "Caídas", "Muertes"]:
 		var h := _label(16, Color(0.7, 0.7, 0.75))
 		h.text = txt
 		grid.add_child(h)
 	for f: Fighter in hm.team():
-		for txt in ["Tú (%s)" % f.display_name if f.is_player else f.display_name, str(hm.kills_of(f)), str(f.deaths)]:
+		for txt in ["Tú (%s)" % f.display_name if f.is_player else f.display_name, str(hm.kills_of(f)), str(f.downs), str(f.deaths)]:
 			var cell := _label(20, Color(1, 1, 0.8) if f.is_player else Color.WHITE)
 			cell.text = txt
 			grid.add_child(cell)

@@ -32,7 +32,13 @@ func _init() -> void:
 	# Bajas con crédito; sin autor (gas) solo cuenta la caída; del propio equipo no suma.
 	var ev := m.on_kill(0, 2)
 	_check(ev.get("counted", false), "una baja del rival cuenta")
-	_check(int(m.scores[0]["kills"]) == 1 and int(m.scores[2]["deaths"]) == 1, "bajas y caídas por leyenda")
+	_check(int(m.scores[0]["kills"]) == 1 and int(m.scores[2]["deaths"]) == 1, "bajas y muertes por leyenda")
+	# Caídas y muertes son cosas distintas: de un derribo se vuelve si un compañero llega a tiempo
+	# (petición del usuario, 2026-09-18: "faltan las muertes también").
+	m.on_down(2)
+	m.on_down(2)
+	_check(int(m.scores[2]["downs"]) == 2, "las caídas se cuentan aparte de las muertes")
+	_check(int(m.scores[2]["deaths"]) == 1, "y levantarse no suma muerte")
 	_check(not m.on_kill(-1, 1).get("counted", true), "caer en el gas no suma baja")
 	_check(not m.on_kill(3, 2).get("counted", true), "una baja del propio equipo no suma")
 

@@ -101,7 +101,10 @@ func _test_ammo() -> void:
 		if id == "ilusionista":
 			_check(l.ammo_max == 0, "la Ilusionista dispara sin límite")
 			continue
-		_check(l.ammo_max == 3 and l.ammo == 3, "%s: 3 disparos llenos (%d/%d)" % [id, l.ammo, l.ammo_max])
+		# Cada leyenda lleva los suyos (LegendData.PVP_AMMO): 3 casi todas, 4 el Rey liche desde que
+		# el usuario lo vio flojo de lejos (2026-09-18).
+		var want := int(LegendData.PVP_AMMO[id]["n"])
+		_check(l.ammo_max == want and l.ammo == want, "%s: %d disparos llenos (%d/%d)" % [id, want, l.ammo, l.ammo_max])
 		var ab := l.abil(0)
 		_check(l.ammo_reload > maxf(float(ab["cd"]), float(ab.get("cast", 0.0))),
 			"%s: la recarga de munición (%.2f) tiene que ser más lenta que la básica" % [id, l.ammo_reload])

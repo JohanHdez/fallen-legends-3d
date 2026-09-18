@@ -32,6 +32,11 @@ const CRAWL_GO := 1.0                   # y no vuelve a arrancar hasta que el co
 ## Distancia a la que quiere pelear cada leyenda (px del juego 2D; las que no están, 70 px).
 const DESIRED_RANGE := {"arquero": 380.0, "clerigo": 300.0, "liche": 340.0, "quimico": 340.0,
 	"tormentero": 340.0, "ilusionista": 360.0, "ciclope": 85.0, "caballero": 90.0, "rompemareas": 110.0}
+## ...pero esa tabla es del 2D y aquí dejaba a las de distancia peleando encima del rival: el Clérigo
+## se plantaba a 4,7 m con un golpe que llega a 10,6 y se comía todos los cuerpo a cuerpo (era el
+## arreglo pendiente de CLAUDE.md, "Clérigo flojo por el cerebro, no por el daño"). Si su básica es de
+## distancia, quiere pelear a KEEP_RANGE de SU alcance, y nunca más cerca de lo que decía la tabla.
+const KEEP_RANGE := 0.75
 
 var f: Fighter
 var combat: Combat
@@ -102,6 +107,7 @@ func _think() -> void:
 		to_c.y = 0.0
 		var margin := main._zone_r - to_c.length()
 		if margin < ZONE_MARGIN:
+			f.run = true              # del gas se sale corriendo
 			_go(main._zone_c + (-to_c).normalized() * minf(main._zone_r * 0.5, 6.0))
 			if not target.is_empty():
 				_use_abilities(d, fleeing)
@@ -113,14 +119,17 @@ func _think() -> void:
 	if fallen != null and d > REVIVE_SAFE:
 		var gap := Vector2(fallen.pos().x - f.pos().x, fallen.pos().z - f.pos().z).length()
 		if gap > Revive.RANGE * 0.7:
+			f.run = true              # a un compañero en el suelo se va corriendo
 			_go(fallen.pos())
 		else:
+			f.run = false
 			_stop()
 			f.crouch = true
 		return
 
 	# 2. Con poca vida, huye del más cercano y lanza lo que le sirva para escapar.
 	if fleeing and not target.is_empty():
+		f.run = true                  # con poca vida, a la carrera
 		var away := f.pos() - (target["node"] as Node3D).global_position
 		away.y = 0.0
 		var dest := f.pos() + away.normalized() * 8.0
@@ -136,19 +145,29 @@ func _think() -> void:
 		if f.pos().distance_to(goal) < 4.0:
 			_stop()
 		else:
+			f.run = false             # sin nadie a la vista no hay prisa
 			_go(goal)
 		return
 
 	# 4. Pelea a su distancia: se acerca, se aleja (a distancia) o se mueve de lado.
-	var want := float(DESIRED_RANGE.get(String(f.data()["id"]), 70.0)) * PX
+	var want := desired_range(String(f.data()["id"]), f.ability_range(0),
+		String(f.abil(0)["k"]) == "melee")
 	var tpos: Vector3 = (target["node"] as Node3D).global_position
 	var to := tpos - f.pos()
 	to.y = 0.0
 	if d > want:
+		# El que persigue CORRE (petición del usuario, 2026-09-18: "revisa cómo balancear más"). Los
+		# bots nunca usaban `run` y, desde que los de distancia pelean a su alcance, un cuerpo a cuerpo
+		# andando detrás de uno que retrocede no lo alcanzaba jamás: el Rompemareas se desplomó del
+		# 85 % al 23 % de duelos ganados. Correr es del que va a por alguien, no del que se aparta: si
+		# corrieran los dos, no se alcanzarían igual.
+		f.run = true
 		_go(tpos)
 	elif d < want * 0.5 and want > 3.0:
+		f.run = false
 		_go(f.pos() - to.normalized() * 3.5)
 	else:
+		f.run = false
 		_strafe_t -= THINK
 		if _strafe_t <= 0.0:
 			_strafe_t = _rng().randf_range(1.0, 2.2)
@@ -160,6 +179,13 @@ func _think() -> void:
 	if _rng().randf() < SKIP_CHANCE:
 		return
 	_use_abilities(d, false)
+
+
+## Metros a los que quiere pelear: los de la tabla del 2D si pega de cerca, y si no, lo que más le
+## convenga entre esa distancia y KEEP_RANGE de su propio alcance.
+static func desired_range(id: String, basic_range: float, melee: bool) -> float:
+	var table := float(DESIRED_RANGE.get(id, 70.0)) * PX
+	return table if melee else maxf(table, basic_range * KEEP_RANGE)
 
 
 ## Rey liche: sus esqueletos atacan mientras pelea y se reagrupan cuando huye. No emboscan.
@@ -281,7 +307,10 @@ func _use_abilities(d: float, escaping: bool) -> void:
 			"heal":
 				use = low or (_hp_frac() < 0.7 and _rng().randf() < 0.3) or _ally_hurt(rad)
 			"buff":
-				use = not escaping and not target.is_empty() and (low or (d < 5.0 and _rng().randf() < 0.3))
+				# Ancla clavada: ahora se planta donde apunta (no a sus pies), así que la usa en cuanto
+				# tiene al objetivo dentro del alcance (usuario, 2026-09-18).
+				use = not escaping and not target.is_empty() and d < rng_m \
+					and (low or _rng().randf() < 0.3)
 			"zone":
 				var reach := rng_m if float(ab.get("rng", 0.0)) > 0.0 else rad
 				use = not target.is_empty() and d < reach
@@ -331,6 +360,7 @@ func _go(to: Vector3) -> void:
 
 func _stop() -> void:
 	_has_goal = false
+	f.run = false
 
 
 func _steer(delta: float) -> void:

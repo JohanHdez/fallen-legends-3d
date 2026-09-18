@@ -47,8 +47,15 @@ func setup(to_win := ROUNDS_TO_WIN, p_round_time := ROUND_TIME) -> void:
 
 
 func add_fighter(fid: int, name: String, team: int, legend: int, is_player := false) -> void:
-	scores[fid] = {"name": name, "team": team, "legend": legend, "kills": 0, "deaths": 0,
+	scores[fid] = {"name": name, "team": team, "legend": legend, "kills": 0, "downs": 0, "deaths": 0,
 		"is_player": is_player}
+
+
+## La han DERRIBADO: se apunta aparte de la muerte, porque de un derribo se vuelve si un compañero
+## llega a tiempo (petición del usuario, 2026-09-18: "faltan las muertes también").
+func on_down(fid: int) -> void:
+	if state == "playing" and scores.has(fid):
+		scores[fid]["downs"] = int(scores[fid]["downs"]) + 1
 
 
 ## Bajas de un equipo en toda la partida (estadística; no decide rondas).

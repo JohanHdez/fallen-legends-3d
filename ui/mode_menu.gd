@@ -198,6 +198,9 @@ func _unhandled_input(e: InputEvent) -> void:
 
 
 func _play() -> void:
+	# Semilla nueva en cada partida (petición del usuario, 2026-09-18): el mapa es el mismo, pero la
+	# hierba, los eriales, la decoración, dónde sales y los sorteos de la partida cambian.
+	Engine.set_meta("fl_seed", Main.new_seed())
 	Engine.set_meta("fl_mode", mode)
 	Engine.set_meta("fl_last_mode", mode)
 	Engine.set_meta("fl_legend", legend)

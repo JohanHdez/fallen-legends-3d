@@ -41,7 +41,12 @@ func _init() -> void:
 	_check(is_equal_approx(Vector2(p.x, p.z).length(), Minions.AMBUSH_RANGE) and is_equal_approx(p.y, 0.0), "a 30 m se recorta a 12 m en el suelo (%s)" % p)
 	var q := Minions.ambush_point(Vector3(1, 0, 1), Vector3(4, 0, 5))
 	_check(q.is_equal_approx(Vector3(4, 0, 5)), "a 5 m se queda donde apuntas")
-	_check(is_equal_approx(Minions.SPEED, 200.0 * LegendData.PX), "a la velocidad de los esbirros del 2D")
+	# Desviaciones del esbirro del 2D, a petición del usuario (2026-09-18: "los esqueletos son muy
+	# débiles, no golpean lo suficientemente rápido"): corren más, pegan más y más a menudo.
+	_check(Minions.SPEED > 200.0 * LegendData.PX, "corren más que el esbirro del 2D (200 px/s)")
+	_check(Minions.HIT_EVERY <= 0.9, "golpean cada %.2f s (antes 1,4)" % Minions.HIT_EVERY)
+	_check(Minions.HIT_DMG >= 20.0, "y pegan %.0f (antes 18)" % Minions.HIT_DMG)
+	_check(Combat.MINION_HP > Combat.DECOY_HP, "y aguantan más que un señuelo (%.0f)" % Combat.MINION_HP)
 	print("test_minions: %s (%d fallos)" % ["OK" if failures == 0 else "FALLO", failures])
 	quit(1 if failures > 0 else 0)
 

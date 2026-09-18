@@ -104,6 +104,7 @@ func toggle() -> void:
 
 func _restart() -> void:
 	get_tree().paused = false
+	Engine.set_meta("fl_seed", Main.new_seed())   # partida nueva, sorteo nuevo (usuario, 2026-09-18)
 	Engine.set_meta("fl_mode", main._mode)
 	Engine.set_meta("fl_legend", main.pf.legend)
 	get_tree().reload_current_scene()

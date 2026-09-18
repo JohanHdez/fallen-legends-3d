@@ -78,6 +78,18 @@ func _init() -> void:
 	for n in ["Hit_Chest", "Hit_Head", "Hit_Shoulder_L", "Hit_Shoulder_R"]:
 		_check(LegendData.HERO_ANIMS.split(",").has(n), "%s está injertada" % n)
 	_check(Combat.HIT_ANIM_MIN > 0.0 and Combat.HIT_ANIM_MIN <= 0.1, "solo se queja con un golpe de verdad")
+	# ...pero una básica cualquiera tiene que hacer que se queje una leyenda de las normales: con el
+	# 4 % de antes, en un duelo Tormentero-Ilusionista no se quejaba NADIE en toda la partida (la
+	# pistola quita 14 de 600 y la esfera 22 de 630), y la sonda lo cazó (2026-09-18). Referencia: el
+	# Tormentero por equipos, 210 de vida ×3.
+	var soft := 210.0 * 3.0 * Combat.HIT_ANIM_MIN
+	for legend in LegendData.ABILITIES:
+		var ab0: Dictionary = LegendData.ABILITIES[legend][0]
+		if String(ab0["k"]) != "proj":
+			continue
+		var dmg := float(ab0["dmg"]) * float(LegendData.PVP_BASIC_DMG.get(legend, 1.0))
+		_check(dmg >= soft, "la básica de %s (%.0f) hace que se queje una leyenda de 630 de vida (hace falta %.0f)" % [
+			legend, dmg, soft])
 	_check(Combat.HIT_ANIM_EVERY >= 0.5, "y no se queja en cada pinchazo de veneno")
 
 	# Tocada (por debajo de la mitad de la vida) se queda encorvada al pararse.
@@ -97,5 +109,20 @@ func _init() -> void:
 	_check(not Combat.crossed_half(hp2 * 0.6, 0.0, hp2), "si lo derriban de ese golpe, no suena (ya se ve)")
 	_check(ResourceLoader.exists("res://assets/audio/sfx/%s.ogg" % Combat.HALF_SOUND),
 		"el sonido %s existe" % Combat.HALF_SOUND)
+	# Máscara antigás del Trasgo Nox (petición del usuario, 2026-09-18): el gas que cierra el mapa no
+	# le hace nada ni a él ni a su equipo. Las nubes de las habilidades ya respetaban a los aliados.
+	_check(Combat.masks_gas("quimico"), "el Trasgo Nox lleva la máscara")
+	for other in ["clerigo", "tormentero", "rompemareas", "liche", "caballero", "ilusionista"]:
+		_check(not Combat.masks_gas(other), "%s no lleva máscara" % other)
+	_check(Combat.team_masks_gas(["clerigo", "quimico"]), "con un Trasgo Nox en el equipo, todos a salvo")
+	_check(not Combat.team_masks_gas(["clerigo", "liche"]), "sin él, el gas quema")
+	_check(not Combat.team_masks_gas([]), "un equipo vacío no lleva máscara")
+	_check(Combat.GAS_MASK_LEGEND == LegendData.LEGENDS[6]["id"], "la máscara es la del Trasgo Nox de LEGENDS")
+
+	# Apuntado asistido: las Esporas se pegan al enemigo más cercano al punto señalado.
+	_check(LegendData.ABILITIES["clerigo"][2].get("snap", false), "las Esporas apuntan solas")
+	_check(Combat.SNAP_R >= 2.0 and Combat.SNAP_R <= 6.0, "el imán del apuntado es de unos metros")
+	_check(float(LegendData.ABILITIES["clerigo"][2]["rad"]) >= 300.0, "y la nube es más ancha que antes (190 px)")
+
 	print("test_combat_rules: %s (%d fallos)" % ["OK" if failures == 0 else "FALLO", failures])
 	quit(1 if failures > 0 else 0)

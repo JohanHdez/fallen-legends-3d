@@ -64,12 +64,17 @@ const DECOY_TINT := Color(0.85, 0.8, 1.35)
 const SWAP_COOLDOWN := 1.0          # el intercambio se salta la recarga, pero no es gratis
 const SPOTTED_TIME := 3.0           # segundos que te delata atacar desde la maleza
 const DECOY_HP := 60.0              # vida de un señuelo (en el 2D, un golpe lo deshace)
+const MINION_HP := 100.0            # vida de un esqueleto del Rey liche (usuario, 2026-09-18: "muy débiles")
+const GAS_MASK_LEGEND := "quimico"  # el Trasgo Nox y su equipo no sufren el gas que cierra el mapa
+const SNAP_R := 4.0                 # apuntado asistido: el punto señalado se pega al rival a esta distancia
 # --- animaciones de movimiento (biblioteca UAL1 Pro, 2026-09-17) ---
 const ANIM_JOG := "Jog"             # de pie
 const ANIM_CROUCH := "Crouch"       # agachada
 const ANIM_CRAWL := "Crawl"         # derribada, arrastrándose
 const ANIM_SIDE := 0.45             # a partir de este seno del ángulo, se mueve de lado
-const HIT_ANIM_MIN := 0.04          # se queja si el golpe le quita al menos este tanto de su vida máxima
+# 2 % de su vida máxima: con el 4 % de antes, en un duelo Tormentero-Ilusionista NADIE se quejaba en
+# toda la partida (la pistola quita 14 de 600 y la esfera 22 de 630) y la sonda lo cazó el 2026-09-18.
+const HIT_ANIM_MIN := 0.02          # se queja si el golpe le quita al menos este tanto de su vida máxima
 const HIT_ANIM_EVERY := 1.2         # y como mucho una queja cada tanto (si no, el veneno la deja tiesa)
 const LOW_HP := 0.5                 # por debajo de esta vida se queda encorvada al pararse
 # Aviso de media vida (petición del usuario, 2026-09-17): por equipos no ves la vida del rival, así
@@ -124,6 +129,7 @@ var damage_by := {}                 # "Leyenda ranura" -> daño hecho a leyendas
 var toxed: Array = []               # fichas envenenadas ahora mismo (toxina del Clérigo)
 var toxin_damage := 0.0             # daño pedido por la toxina (sondas de balance; sin descontar inmunidades)
 var half_cues := 0                  # veces que ha sonado el aviso de media vida (sondas)
+var decoy_marks := 0                # veces que alguien se ha delatado pegando a un señuelo (sondas)
 var _tox_t := 0.0
 var soft_hits := 0                  # proyectiles teledirigidos por equipos que acertaron...
 var soft_misses := 0                # ...y los que se apagaron sin tocar a nadie
@@ -258,6 +264,31 @@ func bar_height(f: Fighter) -> float:
 
 func fighter_by_id(fid: int) -> Fighter:
 	return fighters[fid] if fid >= 0 and fid < fighters.size() else null
+
+
+## Máscara antigás del Trasgo Nox (petición del usuario, 2026-09-18: "a él ni al equipo le debe
+## afectar el gas"): es el que pelea con gas, así que el que cierra el mapa no le quema ni a él ni a
+## los suyos mientras siga en la partida. Solo el gas de la ZONA: las nubes de las habilidades ya
+## respetan a los aliados por equipo.
+static func masks_gas(legend_id: String) -> bool:
+	return legend_id == GAS_MASK_LEGEND
+
+
+## ¿Alguna de estas leyendas (los ids de un equipo, sin contar a las muertas) lleva la máscara?
+static func team_masks_gas(legend_ids: Array) -> bool:
+	for id in legend_ids:
+		if masks_gas(String(id)):
+			return true
+	return false
+
+
+## Lo mismo sobre las leyendas en juego: la máscara vale mientras el Trasgo Nox no esté muerto
+## (derribado sigue contando: está ahí, repartiendo filtros).
+func gas_immune(team: int) -> bool:
+	for f: Fighter in fighters:
+		if f.team == team and not f.dead() and masks_gas(String(f.data()["id"])):
+			return true
+	return false
 
 
 ## Nadie puede apuntarle: por la invisibilidad del Ilusionista, o porque está AGACHADA dentro de
@@ -443,6 +474,18 @@ func foes_in(team: int, at: Vector3, radius: float, n := 999, visible_only := fa
 	return out
 
 
+## Apuntado asistido de las habilidades con "snap" (hoy las Esporas del Clérigo; petición del usuario,
+## 2026-09-18: "que automáticamente señale los enemigos más cercanos"). Si bajo el punto señalado hay
+## un rival a menos de SNAP_R, la nube cae sobre ÉL. En el móvil se apunta arrastrando el dedo a ojo y
+## la nube caía al lado; vale igual para los bots, que apuntan al centro del enemigo.
+func snap_to_foe(f: Fighter, at: Vector3) -> Vector3:
+	var near := foes_in(f.team, at, SNAP_R, 1, true)
+	if near.is_empty():
+		return at
+	var p: Vector3 = (near[0]["node"] as Node3D).global_position
+	return Vector3(p.x, at.y, p.z)
+
+
 ## Daño (y aturdimiento) a cualquier objetivo. `by` es quien lo causa, para acreditar la baja.
 ## `slot` es la ranura que lo causó (-1 si no viene de una habilidad): lo que hace la definitiva no
 ## carga la definitiva.
@@ -470,13 +513,16 @@ func hurt(z: Dictionary, dmg: float, stun := 0.0, by: Fighter = null, slot := -1
 			if dmg <= 0.0 and stun <= 0.0:
 				return
 			dealt = minf(dmg, float(z["hp"]))
+			# Quien le pega (o el dueño de la trampa, zona o esbirro que le pegó) queda marcado para el
+			# equipo del señuelo AL PRIMER GOLPE, aunque el clon aguante (petición del usuario,
+			# 2026-09-18): con los clones duros de la Fiesta se podía tantear cuál era el bueno sin
+			# pagarlo. Caducar o intercambiarse con él no pasa por aquí.
+			if by != null and by.team != int(z.get("team", -1)):
+				by.mark(int(z.get("team", -1)))
+				decoy_marks += 1
 			z["hp"] = float(z["hp"]) - dmg if bool(z.get("tough", false)) else 0.0
 			if float(z["hp"]) <= 0.0:
 				z["hp"] = 0.0
-				# Quien lo rompe (o el dueño de la trampa, zona o esbirro que lo rompió) queda marcado
-				# para el equipo del señuelo. Caducar o intercambiarse con él no pasa por aquí.
-				if by != null and by.team != int(z.get("team", -1)):
-					by.mark(int(z.get("team", -1)))
 				var at: Vector3 = (z["node"] as Node3D).global_position + Vector3(0, 0.9, 0)
 				vfx.burst("magic_02", at, DECOY_TINT, 22, 0.6, 3.5, 0.7, 0.4)
 		_:
@@ -661,6 +707,7 @@ func _hurt_fighter(f: Fighter, amount: float, stun: float, by: Fighter) -> float
 ## Quien la derribó se queda apuntado: suya será la baja si muere.
 func _down(f: Fighter, by: Fighter) -> void:
 	f.downed = true
+	f.downs += 1                       # caídas y muertes se cuentan aparte (usuario, 2026-09-18)
 	f.bleed_t = Revive.BLEED_TIME
 	f.downed_by = by.id if by != null else -1
 	f.revive_progress = 0.0
@@ -803,6 +850,8 @@ func try_cast(f: Fighter, i: int, at: Vector3) -> void:
 ## Cobra la recarga o la carga y arranca el preaviso; el efecto sale al agotarse (player.try_cast).
 func start_cast(f: Fighter, i: int, at: Vector3) -> void:
 	var ab := f.abil(i)
+	if bool(ab.get("snap", false)):
+		at = snap_to_foe(f, at)
 	var cd := float(ab["cd"])
 	if cd_cap > 0.0:
 		cd = minf(cd, cd_cap)     # --cd=N: solo para probar sin esperar la recarga real
@@ -865,7 +914,7 @@ func do_cast(f: Fighter, i: int, at: Vector3) -> void:
 		"heal":
 			cast_heal(f, ab, rad)
 		"buff":
-			cast_buff(f, ab)
+			cast_buff(f, ab, at, rad)
 		"zone":
 			cast_zone(f, ab, at, rad, true)
 		"gas":
@@ -1115,6 +1164,9 @@ func cast_dash(f: Fighter, ab: Dictionary, at: Vector3, rad: float) -> void:
 	f.dash_shove = float(ab.get("shove", 0.0))
 	f.dash_slot = _cast_slot
 	f.dash_hit.clear()
+	# La carga sacude la ralentización (petición del usuario, 2026-09-18: con el gas encima, el Corte
+	# de hacha era "peor de lenta" y no servía para escapar, que es para lo que la usa).
+	f.rec["slow_t"] = 0.0
 	if main._args.has("dashlog"):
 		f.dash_from = f.pos()
 		f.dash_want = f.dash_vec.length()
@@ -1205,17 +1257,35 @@ func cast_heal(f: Fighter, ab: Dictionary, rad: float) -> void:
 		26, 1.1, 2.2, 0.55, 1.6, 30.0, rad * 0.5)
 
 
-func cast_buff(f: Fighter, ab: Dictionary) -> void:
+## El ancla se clava DONDE APUNTAS y quien la tira se queda libre (petición del usuario, 2026-09-18:
+## "cuando el Rompemareas ponga su definitiva no dejarlo estático, incluso él puede elegir dónde
+## atraer a los enemigos"). Antes se clavaba a sus pies y lo dejaba plantado los 5 s: te enterrabas
+## con ella. Ahora el remolino es un sitio del mapa —el ancla se ve clavada allí— y él sigue
+## peleando con su resistencia puesta.
+func cast_buff(f: Fighter, ab: Dictionary, at: Vector3, rad: float) -> void:
+	if f.buff_fx != null:
+		f.buff_fx.queue_free()     # clavar otra antes de que acabe la anterior: solo vale la nueva
+		f.buff_fx = null
 	f.buff_left = float(ab.get("dur", 5.0))
 	f.buff_resist = float(ab.get("resist", 0.3))
 	f.buff_root = bool(ab.get("root", false))
 	f.buff_dmg = float(ab.get("dmg", 0.0))
-	f.buff_rad = float(ab.get("rng", 300.0)) * PX
+	f.buff_rad = rad
 	f.buff_tick = 0.0
 	f.buff_slot = _cast_slot
-	var fx := vfx.ring(f.buff_rad, ab.get("col", Color(1.0, 0.8, 0.35)), 0.7)
-	fx.position = Vector3(0, 0.06, 0)
-	f.body.add_child(fx)
+	var d := at - f.pos()
+	d.y = 0.0
+	f.buff_at = f.pos() + d.limit_length(f.ability_range(_cast_slot))
+	f.buff_at.y = 0.0
+	var fx := Node3D.new()
+	fx.position = f.buff_at + Vector3(0, 0.06, 0)
+	fx.add_child(vfx.ring(f.buff_rad, ab.get("col", Color(1.0, 0.8, 0.35)), 0.7))
+	fx.add_child(vfx.disc(f.buff_rad, ab.get("col", Color(1.0, 0.8, 0.35)), 0.08))
+	var anchor := main._make_anchor()
+	anchor.position = Vector3(0, 0.45, 0)
+	anchor.rotation_degrees = Vector3(18, 0, 0)     # clavada de medio lado, como quien la deja caer
+	fx.add_child(anchor)
+	main.add_child(fx)
 	f.buff_fx = fx
 
 
@@ -1228,10 +1298,10 @@ func tick_buff(f: Fighter, delta: float) -> void:
 		f.buff_tick = 0.8
 		# El aura del Ancla clavada es otro golpe suyo y también levanta polvo, pero a la mitad:
 		# repite cada 0,8 s y con la carga del mandoble entero la nube no se despejaba nunca.
-		vfx.swing_dust(f.pos(), Vector3(0, 0, 1), f.buff_rad, true, MELEE_ARC, 0.45)
-		for z in foes_in(f.team, f.pos(), f.buff_rad):
+		vfx.swing_dust(f.buff_at, Vector3(0, 0, 1), f.buff_rad, true, MELEE_ARC, 0.45)
+		for z in foes_in(f.team, f.buff_at, f.buff_rad):
 			hurt(z, f.buff_dmg, 0.0, f, f.buff_slot)
-			pull(z, f.pos())
+			pull(z, f.buff_at)
 	if f.buff_left <= 0.0 and f.buff_fx != null:
 		f.buff_fx.queue_free()
 		f.buff_fx = null
@@ -1611,6 +1681,26 @@ func cast_decoy(f: Fighter, ab: Dictionary, at: Vector3) -> void:
 		f.hidden_t = float(ab["invis"])
 
 
+## El señuelo lleva SIEMPRE el letrero de su dueña. Se copia aquí (en el tic del mundo) y también
+## desde ReviveSystem en cuanto ella lo cambia: mientras la levantan, el letrero cuenta el porcentaje
+## y cambia CADA fotograma, así que copiarlo solo aquí lo dejaba uno por detrás ("levantando 4 %"
+## contra "5 %") y eso delataba cuál era la de verdad (lo cazó decoy_probe el 2026-09-18).
+func sync_decoy_label(al: Dictionary, owner: Fighter) -> void:
+	var alabel: Label3D = al.get("label")
+	if alabel == null or owner == null or owner.label == null:
+		return
+	if alabel.text != owner.label.text:
+		alabel.text = owner.label.text
+		alabel.modulate = owner.label.modulate
+
+
+## Todos los señuelos vivos de una leyenda, al día con su letrero.
+func sync_decoy_labels(f: Fighter) -> void:
+	for al in allies:
+		if al["kind"] == "decoy" and int(al.get("owner", -1)) == f.id and float(al["hp"]) > 0.0:
+			sync_decoy_label(al, f)
+
+
 ## ¿Hay un señuelo suyo vivo para intercambiarse con él? (Ability.decoy_swap)
 func decoy_alive(f: Fighter) -> Dictionary:
 	for al in allies:
@@ -1689,10 +1779,11 @@ func spawn_ally(f: Fighter, kind: String, pos: Vector3, life: float, mode := 1, 
 		alabel = f.label.duplicate() as Label3D
 		alabel.position.y = abar.position.y + 0.32
 		body.add_child(alabel)
-	# Esqueleto y clones de la Fiesta (`tough`): vida ×3 por equipos como las leyendas (hp_mult de su
-	# dueño). Con 60, los clones duraban 5,5 s de sus 20 (petición del usuario, 2026-09-17). Hueco de
+	# Esqueleto (MINION_HP, subida a 100 el 2026-09-18: "son muy débiles") y clones de la Fiesta
+	# (`tough`, DECOY_HP): los dos con vida ×3 por equipos como las leyendas (hp_mult de su dueño).
+	# Con 60, los clones duraban 5,5 s de sus 20 (petición del usuario, 2026-09-17). Hueco de
 	# formación por orden de salida.
-	var ahp := DECOY_HP * (f.hp_mult if kind == "minion" or tough else 1.0)
+	var ahp := (MINION_HP if kind == "minion" else DECOY_HP) * (f.hp_mult if kind == "minion" or tough else 1.0)
 	allies.append({"node": body, "anims": anims, "kind": kind, "bar": abar, "label": alabel, "hpmax": ahp, "hp": ahp, "tough": tough,
 		"slot_i": minions.of(f).size() if kind == "minion" else 0,
 		"life": life, "swing_t": 0.0, "mode": mode, "turn": turn, "dir": dir,
@@ -1755,10 +1846,7 @@ func _tick_decoy(al: Dictionary, body: CharacterBody3D, delta: float) -> void:
 	if body.is_on_floor() and body.velocity.y < 0.0:
 		body.velocity.y = -1.0
 	body.move_and_slide()
-	var alabel: Label3D = al.get("label")
-	if alabel != null and owner.label != null and alabel.text != owner.label.text:
-		alabel.text = owner.label.text
-		alabel.modulate = owner.label.modulate
+	sync_decoy_label(al, owner)
 	# Gestos: el clon reproduce EXACTAMENTE lo que hace su leyenda, incluido lanzar y arrastrarse
 	# derribada. Es lo que de verdad confunde: si ella conjura, los cinco conjuran.
 	if owner.anim != null:

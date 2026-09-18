@@ -39,5 +39,14 @@ func _init() -> void:
 	_check(not Revive.can_help(false, true, 0.5), "derribado no levanta")
 	_check(not Revive.can_help(true, true, Revive.RANGE + 0.1), "demasiado lejos no levanta")
 	_check(is_equal_approx(Revive.HP, 0.5) and is_equal_approx(Revive.INVULN, 3.0), "media vida y 3 s de inmunidad")
+	# El aviso de cómo levantar a un compañero (petición del usuario, 2026-09-18: "no veo cómo
+	# reanimar a mis compañeros caídos"): dice el nombre, el botón y los metros que faltan.
+	var close := Revive.hint(0.5, false, false, "Clérigo")
+	_check(close.contains("Clérigo") and close.contains("Ctrl"), "a su lado: dice a quién y qué tecla")
+	_check(Revive.hint(0.5, false, true, "Clérigo").contains("▼"), "en el móvil nombra el botón, no la tecla")
+	_check(Revive.hint(0.5, true, false, "Clérigo") == "", "ya agachado, el aviso se calla (manda el progreso)")
+	var far := Revive.hint(6.0, false, false, "Clérigo")
+	_check(far.contains("6 m"), "de lejos dice a cuántos metros está")
+	_check(Revive.hint(30.0, false, false, "Clérigo").contains("ve a por él"), "muy lejos, solo que vaya")
 	print("test_revive: %s (%d fallos)" % ["OK" if failures == 0 else "FALLO", failures])
 	quit(1 if failures > 0 else 0)

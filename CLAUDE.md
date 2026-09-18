@@ -51,12 +51,14 @@ godot --path . --resolution 1600x720 -- --mode=2v2 --autoplay --touch --shot=/tm
 ```
 Flags de prueba (todos en README § "Opciones útiles para probar"): `--mode`, `--legend`,
 `--autoplay`, `--team`, `--down-one`, `--expect-defeat`, `--rounds`, `--roundtime`, `--autocast`, `--probe`, `--near`, `--zombies`, `--wave`,
-`--boss`, `--dianas`, `--cd`, `--nozone`, `--zonewait`, `--zonefast`, `--cycle`, `--night`,
+`--boss`, `--foe`, `--dianas`, `--cd`, `--nozone`, `--zonewait`, `--zonefast`, `--cycle`, `--night`,
 `--nodecor`, `--noshadow`, `--touch`, `--roster`, `--fxtest`, `--bench`, `--log`, `--animlog`,
 `--sporelog`, `--dashlog`, `--meleelog`, `--rocklog`, `--dbg`.
 
 **Determinismo**: `rng` con semilla fija (`MAP_SEED` 1234) y `--fixed-fps 60` hacen que dos
-ejecuciones iguales den la MISMA traza. Así se comprobó que partir `main.gd` no cambió la Horda:
+ejecuciones iguales den la MISMA traza. Ojo: **jugando de verdad la semilla la pone el menú**
+(`Engine` meta `fl_seed`, `Main.new_seed()`, nueva en cada partida y en cada revancha desde el
+2026-09-18); headless y las sondas no pasan por el menú, así que siguen con 1234. Así se comprobó que partir `main.gd` no cambió la Horda:
 se graba `--fixed-fps 60 --legend=N --autocast --near=4 --zombies=14 --log --meleelog --dashlog
 --sporelog --shot=/tmp/x.png --wait=1200` antes y después y se compara con `diff` (quitando `fps=`).
 Usa ese método en cualquier refactor. Un sorteo por pesos se comprueba aparte, con `randomize()`.
@@ -162,8 +164,13 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
    `tools/sync_2d.sh --copy`. Toda cifra de balance sale de `data/*.tres` del 2D; una desviación
    lleva comentario junto al número y fila en el README. Desviaciones vivas: Enganche (recarga 20 s,
    alcance 1200 px), Sanación ×3, Muro de espinas ×3, regeneración a los 10 s (el 2D, 4 s), los cinco
-   clones de la Fiesta con vida ×3 (el 2D los deshace de un golpe) y el **Trasgo Nox**, que en el 2D
-   se llama "Químico" (el `id` sigue siendo `quimico`).
+   clones de la Fiesta con vida ×3 (el 2D los deshace de un golpe), el **Trasgo Nox**, que en el 2D
+   se llama "Químico" (el `id` sigue siendo `quimico`), y las del 2026-09-18, todas a petición del
+   usuario: **Ancla clavada** clavada donde apuntas y sin `root`, **Corte de hacha** (recarga 5 s,
+   radio 130 px, daño 32, sin `sync`, quita la ralentización), **Esporas** de 300 px con apuntado
+   asistido, **Rayo gélido** (0,5 s / 28) con 4 balas, **Alzar esqueleto** cada 4,5 s, **esqueletos**
+   del Rey liche (20 de daño cada 0,85 s, 230 px/s, 100 de vida) y la **máscara antigás** del Trasgo
+   Nox (su equipo ignora la zona).
 5. **Determinismo**: nada de `randomize()` en el juego. Lógica pura nueva → prueba en
    `tests/test_*.gd` (`extends SceneTree`, `print("FALLO: …")`, `quit(1)`); comportamiento en partida
    → sonda en `tests/*_probe.gd` enganchada con `--probe` y añadida a `PROBES` de `tools/check.sh`.
@@ -210,8 +217,12 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
   `world/map3d.gd` (suelo, bloqueadores, peñascos, decoración, tumbas, colisión, gas),
   `chars/character_factory.gd` (glTF, injerto de animaciones, corte de cabeza, armas, ojos, tinte,
   barras), `ui/debug_hud.gd` e insignias.
+- **Balance en duelo** (42 duelos 1v1 con seis semillas, 2026-09-18, medidos también sobre el commit
+  anterior en un árbol de trabajo aparte; tabla completa en el README § "Balance"): tras arreglar el
+  cerebro, las victorias van del 33 % (Caballero, Trasgo Nox) al 86 % (Rey liche); antes iban del
+  17 % al 77 %. Herramienta nueva: `--foe=N` fija la leyenda rival para hacer torneos por parejas.
 - **Balance por equipos** (28 partidas de bots, 2026-09-17, ya con reanimaciones y los esqueletos
-  nuevos): victorias entre el 27 % (Clérigo) y el 70 % (Trasgo Nox, el antiguo Químico); Rompemareas 61 %, Tormentero 55 %,
+  nuevos; **sin volver a medir** con los bots del 2026-09-18): victorias entre el 27 % (Clérigo) y el 70 % (Trasgo Nox, el antiguo Químico); Rompemareas 61 %, Tormentero 55 %,
   Rey liche 50 %, Caballero 40 %, Ilusionista 39 %. **Las rondas se alargan mucho con las
   reanimaciones**: 1v1 66 s, 2v2 71 s, 3v3 90 s, 4v4 62 s (antes 63/40/48/47), y las definitivas pasan
   de 360 a 882 por torneo. Esos números son de ANTES del derribo (2026-09-17): ahora quien cae queda
@@ -221,12 +232,17 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
   pelea a 5,6 m pudiendo disparar a 12,8. **Aturdir en el 3D solo impide moverse**; en el 2D
   tampoco deja atacar (`player.gd`: "no se mueve ni ataca"). Nadie muere en el gas. Los bots
   apenas esquivan.
-- **Clérigo flojo por el cerebro, no por el daño** (2026-09-17): con la toxina su daño con la básica
-  sube +45 % y sus victorias siguen en el 40 % (16 partidas por versión, `--seed`). `DESIRED_RANGE`
-  le hace pelear a 4,7 m cuando su Golpe sagrado llega a 10,6: ese es el arreglo pendiente, y solo
-  afecta a los bots (no a cuando lo juega una persona).
-- **De la oleada 6 en adelante no hay quien pase con bots** (2026-09-17): un equipo de 4 bots cae en
-  la oleada 5 (~5,5 min) y, empezando en la 6, 7 u 8, aguanta 22-47 s. Probado a repartir la vida y
+- **Clérigo flojo por el cerebro: ARREGLADO** (2026-09-18). `BotBrain.desired_range` hace que las de
+  distancia peleen al 75 % de SU alcance (el Clérigo a 8 m, no a 4,7) y `f.run` se enciende al
+  perseguir, huir, salir del gas e ir a levantar a alguien (antes ningún bot corría). Los dos van
+  juntos: el primero solo dejaba a los cuerpo a cuerpo sin poder acercarse (Rompemareas 85 % → 23 %).
+  Duelos 1v1 con seis semillas, antes → después: Clérigo 31 → 69 %, Trasgo Nox 17 → 33 %, Caballero
+  33 → 33 %, Rompemareas 77 → 38 %, Tormentero 67 → 44 %, Ilusionista 67 %, Rey liche 71 → 86 %
+  (tabla completa en el README). Queda medir la Horda y los modos por equipos con esto puesto.
+- **De la oleada 6 en adelante no hay quien pase con bots** (2026-09-17; **sigue igual el
+  2026-09-18** con los bots peleando a su alcance y corriendo: empezando en la 6, el equipo de 4
+  aguanta los mismos 22 s, porque el problema es el enjambre alrededor, no la distancia): un equipo
+  de 4 bots cae en la oleada 5 (~5,5 min) y, empezando en la 6, 7 u 8, aguanta 22-47 s. Probado a repartir la vida y
   el daño de los jefes entre los que salen: cambia poco, mueren por el daño combinado de jefes y
   enjambre. El arreglo de verdad es que los compañeros bot jueguen mejor (distancia, centrarse en el
   jefe, no quedarse en medio del enjambre).

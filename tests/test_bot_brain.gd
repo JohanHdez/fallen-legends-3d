@@ -19,6 +19,7 @@ func _init() -> void:
 	_test_should_shoot()
 	_test_steer_around()
 	_test_crawl_close()
+	_test_desired_range()
 	print("test_bot_brain: %s (%d fallos)" % ["OK" if failures == 0 else "FALLO", failures])
 	quit(1 if failures > 0 else 0)
 
@@ -72,6 +73,28 @@ func _test_steer_around() -> void:
 	# La altura no cuenta.
 	var high := Vector3(far.x, 3.0, far.z)
 	_check(BotBrain.steer_around(high, d, c, r).is_equal_approx(d), "la altura no cambia nada")
+
+
+## A qué distancia pelea cada bot (petición del usuario, 2026-09-18: "revisa cómo balancear más"; el
+## arreglo pendiente de CLAUDE.md). Las de distancia ya no se plantan encima del rival.
+func _test_desired_range() -> void:
+	for id in ["clerigo", "tormentero", "liche", "quimico", "ilusionista"]:
+		var i := 0
+		for k in LegendData.LEGENDS.size():
+			if String(LegendData.LEGENDS[k]["id"]) == id:
+				i = k
+		var ab: Dictionary = LegendData.ABILITIES[id][0]
+		var reach := float(ab["rng"]) * LegendData.PX
+		var want := BotBrain.desired_range(id, reach, false)
+		var old := float(BotBrain.DESIRED_RANGE[id]) * LegendData.PX
+		_check(want > old, "%s pelea más lejos que antes (%.1f m, antes %.1f)" % [id, want, old])
+		_check(want <= reach, "%s pelea DENTRO de su alcance (%.1f m de %.1f)" % [id, want, reach])
+	# Las de cuerpo a cuerpo no se alejan: su básica no llega.
+	for id in ["caballero", "rompemareas", "ciclope"]:
+		var old := float(BotBrain.DESIRED_RANGE[id]) * LegendData.PX
+		_check(is_equal_approx(BotBrain.desired_range(id, 12.0, true), old),
+			"%s sigue peleando de cerca (%.1f m)" % [id, old])
+	_check(BotBrain.KEEP_RANGE > 0.5 and BotBrain.KEEP_RANGE < 1.0, "pelea dentro de su alcance, con margen")
 
 
 func _test_crawl_close() -> void:

@@ -59,6 +59,7 @@ var buff_resist := 0.0
 var buff_root := false
 var buff_dmg := 0.0
 var buff_rad := 0.0
+var buff_at := Vector3.ZERO            # donde quedó clavada el ancla: el aura es SUYA, no del que la clavó
 var buff_tick := 0.0
 var buff_fx: Node3D = null
 var buff_slot := -1
@@ -120,7 +121,8 @@ var reviving := false                  # está levantando a alguien este fotogra
 var invuln_t := 0.0
 var invuln_fx: Node3D = null
 var kills := 0
-var deaths := 0
+var downs := 0                         # veces que la han DERRIBADO (aunque la levantaran)
+var deaths := 0                        # ...y las que se quedó en el suelo y murió
 var streak := 0
 
 

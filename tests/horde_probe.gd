@@ -30,6 +30,8 @@ var _bosses_want := 0
 var _lod_bad := ""           # criatura animándose lejos (o sin animarse cerca)
 var _lod_off := 0            # veces que una criatura lejana estaba sin animar
 var _lod_t := {}             # criatura -> fotogramas seguidos descuadrada
+var _hint_seen := ""         # el aviso de "ve a levantarlo" que llegó a salir en el HUD
+var _hint_frames := 0        # fotogramas con un compañero derribado y tú en pie (para exigirlo)
 
 
 func _ready() -> void:
@@ -82,6 +84,7 @@ func _physics_process(delta: float) -> void:
 	_sweep_if_asked(hm)
 	_check_bosses()
 	_check_anim_lod()
+	_check_revive_hint(hm)
 	for f: Fighter in hm.team():
 		# Daño de criatura: baja la vida sin estar en el gas.
 		if f.hp() < float(_prev_hp[f.id]) - 0.01 and not main._outside_zone(f.pos()):
@@ -97,6 +100,21 @@ func _physics_process(delta: float) -> void:
 
 
 ## --win-now: en la última oleada mata todo lo de la horda, para comprobar que superarla se gana.
+## Con un compañero en el suelo y tú en pie, el HUD tiene que decir cómo levantarlo (petición del
+## usuario, 2026-09-18: "no veo cómo reanimar a mis compañeros caídos"). Se mira el aviso de verdad,
+## el del centro de la pantalla, no la regla suelta.
+func _check_revive_hint(hm: HordeMode) -> void:
+	if hm.hud == null or main.pf == null or not main.pf.alive():
+		return
+	var mate: Fighter = main.downed_mate()
+	if mate == null:
+		return
+	_hint_frames += 1
+	var text: String = hm.hud._down.text
+	if text.contains(mate.display_name) and (text.contains("agáchate") or text.contains("ve a por él")):
+		_hint_seen = text
+
+
 func _sweep_if_asked(hm: HordeMode) -> void:
 	if not _win_now or hm.over or main.horde == null or main.horde.wave < Horde.WAVES:
 		return
@@ -179,6 +197,10 @@ func _finish(hm: HordeMode) -> void:
 	# En partidas cortas los bots matan a las criaturas antes de que lleguen: se mira desde 5 min.
 	if hm.size >= 2 and _t >= 300.0 and _hit_by_creature.size() < 2:
 		_problems.append("las criaturas solo golpearon a %d leyenda(s) del equipo" % _hit_by_creature.size())
+	if _hint_frames > 30 and _hint_seen == "":
+		_problems.append("%d fotogramas con un compañero derribado y el HUD no dijo cómo levantarlo" % _hint_frames)
+	elif _hint_seen != "":
+		print("[SONDA] aviso de reanimación: \"%s\"" % _hint_seen)
 	if _down_at >= 0.0:
 		if _downed == null:
 			_problems.append("no hubo a quién tumbar")

@@ -65,5 +65,28 @@ func _init() -> void:
 	_check(not Horde.run_over(Horde.WAVES, 0, true, 0), "con un jefe en pie, todavía no")
 	_check(not Horde.run_over(Horde.WAVES, 0, false, 5), "con criaturas por salir, todavía no")
 	_check(not Horde.run_over(Horde.WAVES - 1, 0, false, 0), "la oleada 9 limpia solo trae la 10")
+	# Cada oleada entra por un lado distinto (petición del usuario, 2026-09-18: "procurar que...
+	# siempre sean zonas diferentes"): el abanico gira 137,5° por oleada y no repite dirección.
+	var angles: Array = []
+	for w in range(1, Horde.WAVES + 1):
+		angles.append(Horde.wave_angle(w))
+	for i in angles.size():
+		for j in range(i + 1, angles.size()):
+			var sep: float = absf(wrapf(float(angles[i]) - float(angles[j]), -PI, PI))
+			_check(sep > deg_to_rad(20.0), "las oleadas %d y %d no entran por el mismo sitio (%.0f°)" % [
+				i + 1, j + 1, rad_to_deg(sep)])
+	# El abanico se queda con las celdas de su lado, y si no hay ninguna, con todas.
+	var ring: Array = []
+	for k in 36:
+		var a := TAU * float(k) / 36.0
+		ring.append(Vector2i(20 + int(round(cos(a) * 10.0)), 20 + int(round(sin(a) * 10.0))))
+	var center := Vector2i(20, 20)
+	var picked := Horde.sector_cells(ring, center, 3)
+	_check(picked.size() > 0 and picked.size() < ring.size(), "el abanico se queda con una parte (%d de %d)" % [picked.size(), ring.size()])
+	for c: Vector2i in picked:
+		var d := Vector2(c.x - center.x, c.y - center.y)
+		_check(absf(wrapf(d.angle() - Horde.wave_angle(3), -PI, PI)) <= Horde.SECTOR_HALF + 0.01,
+			"la celda %s cae dentro del abanico" % c)
+	_check(Horde.sector_cells([center], center, 1).size() == 1, "sin celdas en el abanico, valen todas")
 	print("test_horde_scaling: %s (%d fallos)" % ["OK" if failures == 0 else "FALLO", failures])
 	quit(1 if failures > 0 else 0)
