@@ -17,6 +17,7 @@ var autoplay := false
 var revive: ReviveSystem
 var hud: HordeHud
 var over := false
+var won := false                       # la Horda se superó (10 oleadas)
 var time := 0.0                        # segundos de partida (pantalla final)
 var _wipe_t := -1.0
 
@@ -131,6 +132,15 @@ func on_fighter_death(f: Fighter, by: Fighter) -> void:
 func on_wave_start() -> void:
 	if over:
 		return
+	# Ahora la partida tiene final (10 oleadas): se anuncia cuál toca y si trae jefes.
+	if hud != null and main.horde != null:
+		var n := Horde.boss_count(main.horde.wave)
+		var txt := "Oleada %d de %d" % [main.horde.wave, Horde.WAVES]
+		if n == 1:
+			txt += " · ¡ROMPEMAREAS!"
+		elif n > 1:
+			txt += " · ¡%d ROMPEMAREAS!" % n
+		hud.banner(txt)
 	for f: Fighter in team():
 		if f.dead():
 			revive.stand_up(f, _respawn_point(f), 1.0)
@@ -153,11 +163,20 @@ func _respawn_point(_f: Fighter) -> Vector3:
 	return main._cell_pos(best.x, best.y) + Vector3(0, 0.2, 0)
 
 
+## Oleada 10 superada: la Horda se gana (esquema del usuario, 2026-09-17; antes no acababa nunca).
+func on_victory() -> void:
+	if over:
+		return
+	won = true
+	_finish()
+
+
 func _finish() -> void:
 	over = true
 	for f: Fighter in combat.fighters:
 		f.wish = Vector3.ZERO
-	print("[FIN] horda: el equipo cae en la oleada %d tras %.0f s · bajas %s" % [main.horde.wave, time,
+	print("[FIN] horda: %s en la oleada %d tras %.0f s · bajas %s" % [
+		"SUPERADA" if won else "el equipo cae", main.horde.wave, time,
 		", ".join(team().map(func(f: Fighter) -> String: return "%s %d/%d" % [f.display_name, _kills_of(f), f.deaths]))])
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	# La insignia de racha que estuviera en pantalla taparía los botones de la pantalla final.

@@ -2,7 +2,8 @@ Recursos de terceros usados en Fallen Legends 3D.
 
 models/               Quaternius  https://quaternius.com
   nature/             Stylized Nature MegaKit                     CC0 1.0
-  chars/UAL*.glb      Universal Animation Library 1 y 2           CC0 1.0
+  chars/UAL1_Pro.glb  Universal Animation Library [Pro]           CC0 1.0
+  chars/UAL2_*.glb    Universal Animation Library 2                CC0 1.0
   chars/Superhero_*   Universal Base Characters                   CC0 1.0
   chars/*_Peasant*    Modular Character Outfits - Fantasy         CC0 1.0
   chars/*_Ranger*     Modular Character Outfits - Fantasy         CC0 1.0

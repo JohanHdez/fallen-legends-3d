@@ -48,5 +48,14 @@ func _init() -> void:
 	_check(CreatureSenses.hears(Vector3.ZERO, Vector3(29.0, 0, 0)), "a 29 m oye el grito")
 	_check(not CreatureSenses.hears(Vector3.ZERO, Vector3(0, 0, 31.0)), "a 31 m no lo oye")
 	_check(CreatureSenses.hears(Vector3.ZERO, Vector3(20.0, 15.0, 20.0)), "la altura no cuenta")
+	# La horda aprieta: deambular no es eterno (petición implícita del usuario, "los zombis no deben
+	# estar quietos": tras HUNT_AFTER sin ver a nadie va derecha a la leyenda más cercana). Sin esto,
+	# una criatura perdida en una esquina dejaba la oleada sin acabar.
+	_check(not CreatureSenses.hunts(0.0), "recién puesta a deambular, no caza")
+	_check(not CreatureSenses.hunts(CreatureSenses.HUNT_AFTER - 0.1), "un poco antes, tampoco")
+	_check(CreatureSenses.hunts(CreatureSenses.HUNT_AFTER), "al cumplirse el tiempo, va a por alguien")
+	_check(CreatureSenses.hunts(60.0), "y sigue yendo")
+	_check(CreatureSenses.HUNT_AFTER >= 10.0 and CreatureSenses.HUNT_AFTER <= 40.0,
+		"el tiempo de deambular es de unos segundos (%.0f s)" % CreatureSenses.HUNT_AFTER)
 	print("test_creature_senses: %s (%d fallos)" % ["OK" if failures == 0 else "FALLO", failures])
 	quit(1 if failures > 0 else 0)

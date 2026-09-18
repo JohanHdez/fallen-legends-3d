@@ -37,5 +37,33 @@ func _init() -> void:
 	_check(is_equal_approx(Horde.dmg_mult(4), Horde.CREATURE_DMG * (1.0 + 4.0 * Horde.STAGE_DMG)), "tramo 4: daño de base por 4 tramos")
 	_check(is_equal_approx(Horde.speed_mult(0), 1.0), "sin gas: velocidad normal")
 	_check(is_equal_approx(Horde.speed_mult(4), 1.0 + 4.0 * Horde.STAGE_SPD), "tramo 4: más rápidas")
+	# Tamaño de las oleadas y tope de vivas: crecen con el equipo (petición del usuario, 2026-09-17:
+	# "más cantidad dependiendo siempre si hay más personas").
+	_check(Horde.wave_size(1, 1) == 10, "oleada 1 en solitario: 10 criaturas")
+	_check(Horde.wave_size(1, 4) > Horde.wave_size(1, 1), "con equipo salen más")
+	_check(Horde.wave_size(1, 4) - Horde.wave_size(1, 1) == Horde.PER_PLAYER_SPAWN * 3, "tres compañeros, tres tandas más")
+	_check(Horde.wave_size(5, 1) > Horde.wave_size(1, 1), "las oleadas crecen con el número")
+	_check(Horde.alive_cap(1) == Main.MAX_ALIVE, "en solitario, el tope de siempre")
+	_check(Horde.alive_cap(4) == Main.MAX_ALIVE + Horde.PER_PLAYER_ALIVE * 3, "con equipo caben más a la vez")
+	_check(Horde.PER_PLAYER_SPAWN >= 6 and Horde.PER_PLAYER_ALIVE >= 10, "el usuario pidió bastantes más por persona")
+
+	# La Horda dura 10 oleadas y los Rompemareas salen del 5 en adelante: 1, 2, 3, 4 y 4 hasta el
+	# final (esquema del usuario, 2026-09-17).
+	_check(Horde.WAVES == 10, "la horda son 10 oleadas")
+	for w in range(1, 5):
+		_check(Horde.boss_count(w) == 0, "oleada %d: sin jefe" % w)
+	_check(Horde.boss_count(5) == 1, "oleada 5: un Rompemareas")
+	_check(Horde.boss_count(6) == 2, "oleada 6: dos")
+	_check(Horde.boss_count(7) == 3, "oleada 7: tres")
+	_check(Horde.boss_count(8) == 4, "oleada 8: cuatro")
+	_check(Horde.boss_count(9) == 4, "oleada 9: siguen siendo cuatro")
+	_check(Horde.boss_count(10) == 4, "oleada 10: cuatro")
+
+	# Superar la última oleada es ganar: no queda nada vivo, ni jefes, ni por salir.
+	_check(Horde.run_over(Horde.WAVES, 0, false, 0), "oleada 10 limpia: victoria")
+	_check(not Horde.run_over(Horde.WAVES, 3, false, 0), "con criaturas vivas, todavía no")
+	_check(not Horde.run_over(Horde.WAVES, 0, true, 0), "con un jefe en pie, todavía no")
+	_check(not Horde.run_over(Horde.WAVES, 0, false, 5), "con criaturas por salir, todavía no")
+	_check(not Horde.run_over(Horde.WAVES - 1, 0, false, 0), "la oleada 9 limpia solo trae la 10")
 	print("test_horde_scaling: %s (%d fallos)" % ["OK" if failures == 0 else "FALLO", failures])
 	quit(1 if failures > 0 else 0)

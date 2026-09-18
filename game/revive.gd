@@ -18,10 +18,11 @@ const INVULN := 3.0                     # y sin recibir daño un rato
 const BLEED_TIME := 45.0                # derribado: lo que tardan en levantarlo antes de que muera
 const FINISH_HP := 1.5                  # rematar: este tanto de su vida máxima en daño lo mata
 const CRAWL_SPEED := 0.25               # se arrastra a este tanto de su velocidad
-# Animaciones (Universal Animation Library de Quaternius; no trae ninguna de gatear). El derribado
-# usa la de nadar pegada al suelo, que se lee como arrastrarse boca abajo; quien levanta se arrodilla.
-const DOWNED_MOVE := "Swim_Fwd"
-const DOWNED_IDLE := "Swim_Idle"
+# Animaciones (Universal Animation Library Pro de Quaternius, 2026-09-17): el derribado GATEA de
+# verdad (Crawl_*, en las cuatro direcciones) y quien lo levanta se arrodilla. Antes, sin la Pro, se
+# usaba la de nadar pegada al suelo como apaño y el usuario lo notó enseguida.
+const DOWNED_STATE := Combat.ANIM_CRAWL   # Crawl_Fwd / _Bwd / _Left / _Right / _Idle, según se arrastre
+const DOWNED_IDLE := DOWNED_STATE + "_Idle"
 const HELPER_ANIM := "Fixing_Kneeling"
 
 

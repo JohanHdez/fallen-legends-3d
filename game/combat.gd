@@ -29,6 +29,10 @@ const SPORE_SPREAD := 320.0 * PX    # radio de contagio al morir uno (5 m)
 const SPORE_CONTAGION := 130.0 * PX # radio de contagio por cercanía en cada tick (2 m)
 const SPORE_TIME := 10.0
 const SPORE_COL := Color(0.5, 1.0, 0.4)
+# --- toxina del Golpe sagrado del Clérigo (petición del usuario, 2026-09-17) ---
+const TOXIN_MAX := 6.0              # tope de segundos envenenado: los golpes seguidos lo alargan hasta aquí
+const TOXIN_TICK := 0.5             # cada cuánto pica
+const TOXIN_COL := Color(0.55, 1.0, 0.45)
 const SLOW_MULT := 0.5              # el gas Nox deja a la mitad de velocidad (Ability.slow)
 
 # --- Baliza Nox (beacon.gd del juego) ---
@@ -60,6 +64,17 @@ const DECOY_TINT := Color(0.85, 0.8, 1.35)
 const SWAP_COOLDOWN := 1.0          # el intercambio se salta la recarga, pero no es gratis
 const SPOTTED_TIME := 3.0           # segundos que te delata atacar desde la maleza
 const DECOY_HP := 60.0              # vida de un señuelo (en el 2D, un golpe lo deshace)
+# --- animaciones de movimiento (biblioteca UAL1 Pro, 2026-09-17) ---
+const ANIM_JOG := "Jog"             # de pie
+const ANIM_CROUCH := "Crouch"       # agachada
+const ANIM_CRAWL := "Crawl"         # derribada, arrastrándose
+const ANIM_SIDE := 0.45             # a partir de este seno del ángulo, se mueve de lado
+const HIT_ANIM_MIN := 0.04          # se queja si el golpe le quita al menos este tanto de su vida máxima
+const HIT_ANIM_EVERY := 1.2         # y como mucho una queja cada tanto (si no, el veneno la deja tiesa)
+const LOW_HP := 0.5                 # por debajo de esta vida se queda encorvada al pararse
+# Aviso de media vida (petición del usuario, 2026-09-17): por equipos no ves la vida del rival, así
+# que cuando tu equipo le baja del 50 % suena algo que se quiebra (cristal de Kenney, CC0).
+const HALF_SOUND := "impactGlass_heavy_003"
 
 # --- carga del Mandoble del Rompemareas (player.CHARGE_*) ---
 const MELEE_ARC := 126.0            # abanico por defecto de un golpe cuerpo a cuerpo, en grados
@@ -106,6 +121,10 @@ var cd_cap := 0.0                   # --cd=N: recorta TODAS las recargas, solo p
 var casts := {}                     # tipo de habilidad -> veces lanzada (sondas y --log)
 var ult_casts := 0                  # definitivas lanzadas (sondas)
 var damage_by := {}                 # "Leyenda ranura" -> daño hecho a leyendas rivales (sondas de balance)
+var toxed: Array = []               # fichas envenenadas ahora mismo (toxina del Clérigo)
+var toxin_damage := 0.0             # daño pedido por la toxina (sondas de balance; sin descontar inmunidades)
+var half_cues := 0                  # veces que ha sonado el aviso de media vida (sondas)
+var _tox_t := 0.0
 var soft_hits := 0                  # proyectiles teledirigidos por equipos que acertaron...
 var soft_misses := 0                # ...y los que se apagaron sin tocar a nadie
 var traps_sprung := 0               # trampas eléctricas que alguien pisó después de puestas (sondas: ¿las esquivan?)
@@ -360,18 +379,24 @@ func move_fighter(f: Fighter, delta: float) -> void:
 		f.body.velocity.y = -1.0
 	f.body.move_and_slide()
 
-	if moving and f.model != null:
-		var target := atan2(wish.x, wish.z)
-		f.model.rotation.y = lerp_angle(f.model.rotation.y, target, TURN_SPEED * delta)
+	# Hacia dónde MIRA (que ya no es siempre hacia dónde anda): tu leyenda mira a donde apunta la
+	# cámara, un bot a su objetivo, y quien no tiene a qué mirar, a su marcha. Así se ven las
+	# animaciones de andar de lado y de espaldas (petición del usuario, 2026-09-17).
+	var look := face_dir(f, wish)
+	if f.model != null and look.length() > 0.01:
+		f.model.rotation.y = lerp_angle(f.model.rotation.y, atan2(look.x, look.z), TURN_SPEED * delta)
 
 	f.cast_anim_t = maxf(0.0, f.cast_anim_t - delta)
+	f.hit_anim_t = maxf(0.0, f.hit_anim_t - delta)
+	f.hit_anim_cd = maxf(0.0, f.hit_anim_cd - delta)
+	var step := wish if moving else Vector3.ZERO
 	if f.anim != null and f.downed:
-		var crawl := Revive.DOWNED_MOVE if moving else Revive.DOWNED_IDLE
+		var crawl := move_anim(step, f.facing(), Revive.DOWNED_STATE)
 		if f.anim.has_animation(crawl) and f.anim.current_animation != crawl:
 			main._play_all(f.anims, crawl)
-	elif f.anim != null and f.cast_anim_t <= 0.0 and f.alive():
-		var want := ("Crouch_Fwd" if moving else "Crouch_Idle") if f.crouch \
-			else ("Jog_Fwd" if moving else "Idle")
+	elif f.anim != null and f.cast_anim_t <= 0.0 and f.hit_anim_t <= 0.0 and f.alive():
+		var want := move_anim(step, f.facing(), ANIM_CROUCH if f.crouch else ANIM_JOG,
+			f.hp() < f.hp_max() * LOW_HP)
 		if f.reviving and not moving:
 			want = Revive.HELPER_ANIM      # levantando a un compañero: arrodillado
 		if not f.anim.has_animation(want):
@@ -421,7 +446,8 @@ func foes_in(team: int, at: Vector3, radius: float, n := 999, visible_only := fa
 ## Daño (y aturdimiento) a cualquier objetivo. `by` es quien lo causa, para acreditar la baja.
 ## `slot` es la ranura que lo causó (-1 si no viene de una habilidad): lo que hace la definitiva no
 ## carga la definitiva.
-func hurt(z: Dictionary, dmg: float, stun := 0.0, by: Fighter = null, slot := -1) -> void:
+## `poison` es false cuando el daño lo hace la propia toxina: si no, se envenenaría sola sin parar.
+func hurt(z: Dictionary, dmg: float, stun := 0.0, by: Fighter = null, slot := -1, poison := true) -> void:
 	if by != null:
 		dmg *= by.dmg_mult               # 1 salvo el jefe de la Horda
 	var dealt := 0.0
@@ -464,6 +490,136 @@ func hurt(z: Dictionary, dmg: float, stun := 0.0, by: Fighter = null, slot := -1
 		if String(z.get("kind", "")) == "fighter":
 			var key := "%s %s" % [by.display_name, ["básica", "táctica", "definitiva"][slot] if slot >= 0 and slot <= 2 else "otro"]
 			damage_by[key] = float(damage_by.get(key, 0.0)) + dealt
+		# Golpe que envenena (hoy el Golpe sagrado del Clérigo): sigue quitando vida un rato.
+		if poison and slot >= 0 and float(by.abil(slot).get("toxin", 0.0)) > 0.0:
+			var ab := by.abil(slot)
+			_poison(z, by, slot, float(ab["toxin"]), float(ab.get("tdmg", 0.0)))
+
+
+## Un gesto suelto (dar órdenes a los esqueletos): la animación manda sobre andar mientras dura.
+func gesture(f: Fighter, name: String, secs: float) -> void:
+	if f.anim == null or not f.anim.has_animation(name) or f.downed or not f.alive():
+		return
+	f.cast_anim_t = maxf(secs, 0.2)
+	main._play_all(f.anims, name)
+	var alen := f.anim.get_animation(name).length
+	for ap in f.anims:
+		ap.speed_scale = alen / f.cast_anim_t
+
+
+## Se queja del golpe: una animación corta de encogerse por donde le han dado (petición del usuario,
+## 2026-09-17). Solo con golpes de verdad y con descanso entre quejas, para que el veneno o el gas no
+## la dejen tiesa; el conjuro que esté echando manda.
+func _flinch(f: Fighter, dealt: float, by: Fighter) -> void:
+	if dealt < f.hp_max() * HIT_ANIM_MIN or f.hit_anim_cd > 0.0 or f.cast_anim_t > 0.0 or f.anim == null:
+		return
+	var from := Vector3.ZERO
+	if by != null:
+		from = by.pos() - f.pos()
+	var name := hit_anim(from, f.facing())
+	if not f.anim.has_animation(name):
+		return
+	f.hit_anim_t = f.anim.get_animation(name).length
+	f.hit_anim_cd = HIT_ANIM_EVERY
+	main._play_all(f.anims, name)
+
+
+## ¿Este golpe le ha bajado del 50 % de su vida? (justo antes estaba por encima y ahora no). Si lo
+## derriba, no cuenta: eso ya se ve y se oye.
+static func crossed_half(before: float, after: float, hp_max: float) -> bool:
+	var half := hp_max * LOW_HP
+	return before > half and after <= half and after > 0.0
+
+
+## De qué lado le han dado, para encogerse por ahí: `from` es hacia dónde está quien golpea (desde
+## quien lo recibe). Sin autor conocido (gas, veneno), al pecho.
+static func hit_anim(from: Vector3, facing: Vector3) -> String:
+	var v := Vector3(from.x, 0.0, from.z)
+	if v.length() < 0.01:
+		return "Hit_Chest"
+	v = v.normalized()
+	var f := Vector3(facing.x, 0.0, facing.z).normalized()
+	var right := f.cross(Vector3.UP)
+	var side := right.dot(v)
+	if absf(side) >= ANIM_SIDE:
+		return "Hit_Shoulder_R" if side > 0.0 else "Hit_Shoulder_L"
+	return "Hit_Chest" if f.dot(v) >= 0.0 else "Hit_Head"
+
+
+## Hacia dónde mira una leyenda: tu leyenda, a donde apunta la cámara (como en cualquier juego en
+## tercera persona: así puedes disparar de frente mientras te mueves de lado); un bot, a su objetivo
+## si lo tiene; y si no hay nada de eso, hacia donde anda.
+func face_dir(f: Fighter, wish: Vector3) -> Vector3:
+	if f.brain == null and f.is_player:
+		return main.cam_forward()
+	if f.brain != null:
+		var b := f.brain as BotBrain
+		if not b.target.is_empty() and is_instance_valid(b.target.get("node")):
+			var to: Vector3 = (b.target["node"] as Node3D).global_position - f.pos()
+			to.y = 0.0
+			if to.length() > 0.3:
+				return to.normalized()
+	return wish
+
+
+## Qué animación toca según hacia dónde se mueve respecto a donde MIRA: de frente, de espaldas o de
+## lado (petición del usuario, 2026-09-17; antes el modelo giraba siempre hacia su marcha y solo hacía
+## falta una). `state` es ANIM_JOG, ANIM_CROUCH o ANIM_CRAWL.
+static func move_anim(wish: Vector3, facing: Vector3, state: String, hurt := false) -> String:
+	var w := Vector3(wish.x, 0.0, wish.z)
+	if w.length() < 0.01:
+		if state != ANIM_JOG:
+			return state + "_Idle"
+		return "Idle_Tired" if hurt else "Idle"
+	w = w.normalized()
+	var f := Vector3(facing.x, 0.0, facing.z).normalized()
+	var right := f.cross(Vector3.UP)          # mirando a +Z, su derecha es -X
+	var side := right.dot(w)
+	if absf(side) >= ANIM_SIDE:
+		return state + ("_Right" if side > 0.0 else "_Left")
+	return state + ("_Fwd" if f.dot(w) >= 0.0 else "_Bwd")
+
+
+## Segundos de veneno tras un golpe más: se acumulan hasta TOXIN_MAX.
+static func toxin_time(cur: float, add: float) -> float:
+	return minf(cur + add, TOXIN_MAX)
+
+
+## Envenena una ficha (criatura, leyenda, esbirro o señuelo).
+func _poison(z: Dictionary, by: Fighter, slot: int, secs: float, dps: float) -> void:
+	if dps <= 0.0:
+		return
+	if float(z.get("tox_t", 0.0)) <= 0.0:
+		toxed.append(z)
+	z["tox_t"] = toxin_time(float(z.get("tox_t", 0.0)), secs)
+	z["tox_by"] = by.id
+	z["tox_slot"] = slot
+	z["tox_dps"] = dps
+
+
+## La toxina pica cada TOXIN_TICK. Se acredita a la ranura que la puso (la básica), así que cuenta
+## para la definitiva de su dueño igual que el impacto.
+func tick_toxin(delta: float) -> void:
+	if toxed.is_empty():
+		return
+	_tox_t -= delta
+	if _tox_t > 0.0:
+		return
+	_tox_t = TOXIN_TICK
+	for i in range(toxed.size() - 1, -1, -1):
+		var z: Dictionary = toxed[i]
+		z["tox_t"] = float(z.get("tox_t", 0.0)) - TOXIN_TICK
+		var node = z.get("node")
+		if float(z["tox_t"]) <= 0.0 or not is_instance_valid(node) \
+				or float(z.get("dead_t", -1.0)) >= 0.0 or float(z.get("hp", 0.0)) <= 0.0:
+			z["tox_t"] = 0.0
+			toxed.remove_at(i)
+			continue
+		var dmg := float(z.get("tox_dps", 0.0)) * TOXIN_TICK
+		toxin_damage += dmg
+		hurt(z, dmg, 0.0, fighter_by_id(int(z.get("tox_by", -1))), int(z.get("tox_slot", -1)), false)
+		vfx.burst("magic_03", (node as Node3D).global_position + Vector3(0, 1.0, 0), TOXIN_COL,
+			5, 0.5, 1.0, 0.3, -0.6, 70.0, 0.25)
 
 
 ## Devuelve la vida que de verdad le ha quitado.
@@ -481,12 +637,19 @@ func _hurt_fighter(f: Fighter, amount: float, stun: float, by: Fighter) -> float
 	if f.guard:
 		mult *= GUARD_DAMAGE_MULT
 	var dealt := minf(amount * mult, f.hp())
+	var before := f.hp()
 	f.rec["hp"] = f.hp() - amount * mult
 	f.rec["bar_t"] = Main.BAR_SHOW
 	if amount * mult > 0.0:
 		f.since_damage = 0.0
 	if stun > 0.0 and not f.guard:
 		f.rec["stun_t"] = maxf(float(f.rec.get("stun_t", 0.0)), stun)
+	_flinch(f, dealt, by)
+	# Aviso de media vida: solo para TU equipo y sobre un rival, que es de quien no ves la barra.
+	if by != null and main.pf != null and by.team == main.pf.team and f.team != by.team \
+			and crossed_half(before, f.hp(), f.hp_max()):
+		half_cues += 1
+		_sound(f, HALF_SOUND, -2.0)
 	if f.hp() <= 0.0:
 		f.rec["hp"] = 0.0
 		_down(f, by)
@@ -656,14 +819,18 @@ func start_cast(f: Fighter, i: int, at: Vector3) -> void:
 	f.windup = float(ab.get("cast", 0.25))
 	f.windup_idx = i
 	f.windup_at = at
+	# Cargado (el mandoble del Rompemareas) la habilidad puede pedir OTRA animación, más larga:
+	# "anim_charged" / "adur_charged" (idea del usuario, 2026-09-17: el combo al cargar).
+	var charged: bool = bool(ab.get("charge", false)) and f.charge_mult > 1.02 \
+		and String(ab.get("anim_charged", "")) != ""
 	# `adur` alarga SOLO la animación, no el preaviso: el lanzamiento de roca dura 1,33 s y
 	# comprimido a los 0,35 s del preaviso salía a 3,8x. El conjuro sale a su hora igual.
-	var dur := maxf(float(ab.get("adur", 0.0)), maxf(f.windup, 0.35))
+	var dur := maxf(float(ab.get("adur_charged" if charged else "adur", 0.0)), maxf(f.windup, 0.35))
 	f.cast_anim_t = dur
 	# Cada habilidad puede pedir su propia animación ("anim"): el mazazo del Cíclope y el
 	# terremoto del Guerrero usan un tajo corto, la roca OverhandThrow y la Retirada Roll.
 	# Si no la pide, o el modelo no la trae, se cae al reparto de siempre.
-	var anim: String = String(ab.get("anim", ""))
+	var anim: String = String(ab.get("anim_charged" if charged else "anim", ""))
 	if anim == "" or f.anim == null or not f.anim.has_animation(anim):
 		anim = "Sword_Attack" if ab["k"] in ["melee", "dash"] else "Spell_Simple_Shoot"
 	main._play_all(f.anims, anim)
@@ -1749,6 +1916,7 @@ func tick_world(delta: float) -> void:
 	tick_storms(delta)
 	tick_spikes(delta)
 	tick_spores(delta)
+	tick_toxin(delta)
 	for f: Fighter in fighters:
 		tick_summon_queue(f, delta)
 	tick_allies(delta)
@@ -1824,6 +1992,9 @@ func clear_world() -> void:
 			f.guard_fx = null
 		f.summon_queue.clear()
 		f.spore_dps = 0.0
+	for z in toxed:
+		z["tox_t"] = 0.0
+	toxed.clear()
 
 
 ## Libera todo lo que el combate ha creado (al salir de la partida).

@@ -6,6 +6,7 @@ extends Control
 
 var main: Main
 var _panel: PanelContainer
+var _fps_btn: Button
 var _was_captured := false
 
 
@@ -42,6 +43,12 @@ func setup(p_main: Main) -> void:
 		var b := _button(entry[0], Vector2(300, 68), 30)
 		b.pressed.connect(entry[1])
 		col.add_child(b)
+	# Contador de FPS: para mirar el rendimiento en el móvil sin flags de consola (petición del
+	# usuario, 2026-09-17).
+	_fps_btn = _button("", Vector2(300, 56), 22)
+	_fps_btn.pressed.connect(_toggle_fps)
+	col.add_child(_fps_btn)
+	_update_fps_btn()
 	# Controles de teclado: agacharse con Ctrl no se decía en ningún sitio (en móvil hay botón ▼).
 	var keys := Label.new()
 	keys.text = "Teclado: WASD mover · Shift correr · Ctrl agacharse\nQ o clic básica · E táctica · R definitiva · C cámara · P pausa"
@@ -50,6 +57,16 @@ func setup(p_main: Main) -> void:
 	keys.add_theme_color_override("font_color", Color(0.8, 0.82, 0.9, 0.9))
 	col.add_child(keys)
 	_panel.visible = false
+
+
+func _toggle_fps() -> void:
+	main.set_fps_visible(not main.show_fps)
+	_update_fps_btn()
+
+
+func _update_fps_btn() -> void:
+	if _fps_btn != null:
+		_fps_btn.text = "FPS: sí" if main.show_fps else "FPS: no"
 
 
 func _button(text: String, min_size: Vector2, sz: int) -> Button:

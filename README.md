@@ -50,7 +50,7 @@ headless, se salta y se juega la Horda como siempre; `--mode=` elige directament
 
 | Modo | Qué es |
 |---|---|
-| **Horda** | Oleadas de criaturas, **solo o con 1-3 compañeros bot** (selector "Equipo" del menú). Se pierde si cae todo el equipo. |
+| **Horda** | **10 oleadas** de criaturas, **solo o con 1-3 compañeros bot** (selector "Equipo" del menú). Se pierde si cae todo el equipo y **se gana superando la oleada 10**. |
 | **1v1, 2v2, 3v3, 4v4** | Tú más compañeros bot contra rivales bot, **al mejor de 3 rondas**. |
 
 **Derribo y reanimaciones** (Horda y PvP; petición del usuario, 2026-09-17, cifras del 2D): a 0 de
@@ -64,9 +64,22 @@ quien la derribó**; muerta ya no se levanta: en PvP vuelve en la ronda siguient
 empezar la oleada siguiente. Antes volvía sola a los 15/30/60 s; eso se quitó a petición del usuario
 ("me gusta que duren un poco las partidas"). Los bots van a levantar a un compañero si no tienen un
 rival a menos de 8 m, y un derribado se arrastra hacia el compañero en pie más cercano. Animaciones:
-al no haber ninguna de gatear en la Universal Animation Library, el derribado usa la de nadar pegada
-al suelo (`Swim_Fwd`/`Swim_Idle`) y quien levanta se arrodilla (`Fixing_Kneeling`). Medido con bots
+el derribado **gatea de verdad** (`Crawl_Fwd/_Bwd/_Left/_Right/_Idle`, de la biblioteca Pro) y quien
+levanta se arrodilla (`Fixing_Kneeling`). Medido con bots
 (4v4): 12 derribos, 4 levantados (12,6 s de media derribados) y 2 muertos desangrados.
+
+**Las 10 oleadas y los jefes** (esquema del usuario, 2026-09-17): la Horda dura **10 oleadas** y
+superarlas es **ganar** (antes no acababan nunca). Los **Rompemareas** empiezan en la **oleada 5** y
+van a más: **1 en la 5, 2 en la 6, 3 en la 7 y 4 de la 8 a la 10**. Cuando salen varios, la vida de
+cada uno se reparte por la raíz del número (cuatro jefes no son cuatro veces la vida, sino el doble
+en total): con la vida entera eran 9.200 puntos de jefe y no había por dónde. Al empezar cada oleada
+se anuncia en pantalla ("Oleada 6 de 10 · ¡2 ROMPEMAREAS!").
+
+Con el equipo salen **más criaturas**: +6 por compañero en cada oleada (antes +3) y +10 vivas a la
+vez (antes +8), así que un equipo de cuatro se enfrenta a 44 criaturas en la oleada 5 con hasta 70
+vivas. Medido con bots: tanto en solitario como en equipo de cuatro se cae en la **oleada 5** a los
+~5,5 minutos; de la 6 en adelante los bots aguantan menos de un minuto, así que el tramo con varios
+jefes es, hoy por hoy, contenido al que llegar jugando bien.
 
 **Horda en equipo**: tus compañeros salen a tu lado con leyendas distintas. Las criaturas persiguen a
 la leyenda que tengan más cerca, y las oleadas crecen como en el 2D: 3 criaturas más por compañero y
@@ -264,6 +277,43 @@ iban todas con las manos vacías, y en un arquero eso no se sostiene.
 
 ### Animaciones
 
+**Biblioteca Pro** (Universal Animation Library [Pro] de Quaternius, CC0, 2026-09-17): sustituye a la
+gratuita y pasa de 43 a 120 animaciones. Con ella, las leyendas ya no giran siempre hacia donde andan:
+**tu leyenda mira a donde apunta la cámara** y **un bot a su objetivo**, así que el movimiento se
+dibuja con la animación que toca según hacia dónde va respecto a donde mira — `Jog_Fwd`, `Jog_Bwd`,
+`Jog_Left`, `Jog_Right`, sus versiones agachadas (`Crouch_*`) y, derribado, las de gatear (`Crawl_*`).
+La regla vive en `Combat.move_anim` y hacia dónde mira cada uno en `Combat.face_dir`.
+
+**Al recibir un golpe se quejan** (petición del usuario, 2026-09-17): una animación corta de encogerse
+**por donde le han dado** — `Hit_Chest` de frente, `Hit_Head` por la espalda y `Hit_Shoulder_L/R` por
+los lados (`Combat.hit_anim`). Solo con golpes que quiten al menos el **4 % de su vida máxima** y como
+mucho una queja cada **1,2 s**, para que el veneno, el gas o una ráfaga no los dejen tiesos; el conjuro
+que estén echando manda sobre la queja. **Con menos de media vida** se quedan **encorvados** al pararse
+(`Idle_Tired`).
+
+Para juzgar una animación en una captura: `--poseanim=Crawl_Fwd`, y con `--roster --poseanim=Idle_Tired`
+salen las siete leyendas haciéndola en fila.
+
+**Cada habilidad con su gesto** (peticiones e ideas del usuario, 2026-09-17). Antes las 21
+habilidades de las 7 leyendas salían con dos animaciones: un tajo para lo cuerpo a cuerpo y un
+conjuro para todo lo demás. Ahora:
+
+| Leyenda | Habilidad | Animación |
+|---|---|---|
+| Tormentero | Trampa eléctrica · Tormenta | `OverhandThrow` · `Spell_Double_Shoot` |
+| Clérigo | Sanación · Esporas | `Spell_Double_Shoot` · **`Consume`** (se bebe el frasco) |
+| Ilusionista | Pistola espectral · Fiesta de clones | **`Pistol_Shoot`** · `Spell_Double_Shoot` |
+| Caballero esqueleto | Lanzada · Corte de hacha · Muro de espinas | `Sword_Regular_A` · **`Sword_Dash`** · `OverhandThrow` |
+| Rompemareas | Mandoble (normal · **cargado**) · Enganche · Ancla clavada | **`Sword_Regular_C`** · **`Sword_Regular_Combo`** · `OverhandThrow` · `Sword_Regular_B` |
+| Rey liche | Alzar esqueleto · Alzar ejército · dar órdenes | `Spell_Double_Shoot` · `Spell_Double_Enter` · **`Idle_Rail_Call`** |
+| Trasgo Nox | Frasco · Baliza · Granada | `OverhandThrow` (los tres, a distinta velocidad) |
+
+El campo nuevo **`anim_charged`** (con su `adur_charged`) es para el mandoble: al cargarlo sale el
+combo en vez del tajo normal. Las órdenes del Rey liche usan `Combat.gesture`, que reserva la
+animación unos segundos sin ser una habilidad. `tests/test_anim_map.gd` carga las dos bibliotecas de
+verdad y falla si una habilidad pide una animación que no existe, que no está injertada o que sale
+fuera de 0,4-3× al estirarla al preaviso.
+
 `Roll`, `OverhandThrow`, `Sword_Regular_A/B` y `Shield_Dash` estaban en el pack sin que las usara
 nadie. Cada habilidad puede pedir la suya con `"anim"`, y hay dos ajustes de tiempo:
 
@@ -283,7 +333,37 @@ espera armada, baliza, muro de espinas que brota progresivamente, esbirros y se�
 
 Los enemigos **eligen objetivo**: al aliado más cercano si lo tienen a menos de 14 m, si no al jugador.
 
+## Aviso de media vida
+
+Petición del usuario (2026-09-17): **por equipos no ves la barra de vida del rival**, así que cuando
+tu equipo le baja del **50 %** suena algo que se quiebra (cristal del pack de golpes de Kenney, CC0),
+en la posición del rival y con el volumen según lo lejos que esté. Solo suena **una vez por cruce**
+(si ya estaba por debajo, no vuelve a sonar) y **no suena si ese golpe lo derriba**, porque eso ya se
+ve y se oye. Reglas en `Combat.crossed_half`; medido: 7 avisos en una partida 2v2 de bots.
+
+## Toxina del Clérigo
+
+Desviación del 2D (petición del usuario, 2026-09-17, "para que el Clérigo coja más fuerza"): **cada
+Golpe sagrado que impacta envenena**. El veneno quita **8 de vida por segundo** y cada golpe le suma
+**2 s**, hasta un tope de **6 s**; es decir, **16 de daño extra por golpe**, tanto como el impacto,
+y mientras dure impide que el rival empiece a regenerar (la regeneración pide 10 s sin
+recibir daño). Pica cada 0,5 s con una bocanada verde, se acredita a la básica —así que carga su
+definitiva igual que el impacto— y vale contra criaturas, leyendas, esbirros y señuelos. Entre rondas
+se limpia. En datos son dos campos de la habilidad (`toxin` y `tdmg` en `LegendData.ABILITIES`), así
+que cualquier otra habilidad puede envenenar añadiéndolos.
+
+**Medido** (el Clérigo en los 4 modos × 4 semillas, 16 partidas por versión): su daño con la básica
+sube de **1.124 a 1.630 por partida** (+45 %; la toxina pide 910 por partida, parte se la comen
+inmunidades y objetivos que no son leyendas). **Sus victorias no se mueven**: 42 % antes, 40 %
+después. El cuello de botella no es su daño, sino que en partidas de bots muere mucho (K/D 19/27) y
+su cerebro pelea a 4,7 m pudiendo disparar a 10,6 (`BotBrain.DESIRED_RANGE`). Cuando lo llevas tú,
+la toxina es daño limpio que además impide que el rival empiece a regenerar.
+
 ## Esporas del Clérigo
+
+Cuánto quitan, medido en partidas de bots (2v2, vida ×3): **~250 de vida por lanzamiento** con
+varios infectados, y **~175 a una leyenda sola** (un cuarto de sus 720). Es su definitiva, así que
+sale 2-5 veces por partida.
 
 Con la mecánica real de `player.gd` (SPORE_*): infecta al apuntado y a los de alrededor, cada
 infectado lleva **cuatro bultos pegados al cuerpo**, el daño empieza en 10/s y sube +1,5 por
@@ -341,9 +421,10 @@ pinta solo fuera de ella. Funciona en Forward+ y en Compatibilidad (móvil).
 
 ## Rayos del Tormentero
 
-La **Trampa eléctrica** puesta es una **esfera eléctrica que flota** sobre su aro, con cuatro brazos
-de plasma saltándole alrededor (petición del usuario, 2026-09-17; antes era un disco pequeño en el
-suelo que no se leía). Los brazos se rehacen con senos del reloj, no con el `rng`, para no cambiar las
+La **Trampa eléctrica** puesta es una **esfera eléctrica que flota** sobre su aro, con **diez brazos
+de plasma finos** que se encienden y se apagan por turnos cada 0,09 s, para que parezca electricidad
+y no una estrella fija (peticiones del usuario, 2026-09-17; antes era un disco pequeño en el suelo
+que no se leía, y luego cuatro brazos gruesos y fijos). Los brazos se rehacen con senos del reloj, no con el `rng`, para no cambiar las
 trazas deterministas. Cada descarga suelta un rayo del cielo sobre cada víctima y **suena**
 (`shock.ogg` de Flare, el mismo del 2D). La **Tormenta eléctrica** tira siete rayos al caer y,
 además, **un rayo con trueno sobre cada enemigo que siga dentro** en el golpe y en cada descarga de
@@ -354,8 +435,8 @@ traza del Tormentero (las demás salen iguales).
 ## Baliza Nox del Trasgo Nox
 
 Con `beacon.gd` del juego: una **esfera de 60 de vida apoyada en el suelo que bloquea el paso**
-(petición del usuario, 2026-09-17; antes era un poste). Al activarse se enciende y **empieza a echar
-humo verde**, así que se ve de lejos que ya está viva. Espera dormido y lo
+(petición del usuario, 2026-09-17; antes era un poste). Al activarse **crece y late**; llevó humo
+saliendo de ella un rato y el usuario lo quitó ("no generes 3 bolas arriba, me parece innecesario"). Espera dormido y lo
 despierta un enemigo a 2 m **o cualquier golpe** — las criaturas la muelen a golpes si la tienen a
 mano. Al reventar suelta humo Nox de 5 m durante 10 s: 8 de daño cada 0,5 s y **velocidad a la
 mitad**. 3 cargas, una cada 10 s, hasta 5 puestas.
@@ -476,8 +557,19 @@ lo que bloquea), y el mapa se redibuja 20 veces por segundo, no en cada fotogram
   ve continua y no hay huecos con pared invisible.
 - **Lápidas** del cementerio: medían 31 × 37 cm y no chocaban; ahora ~75 × 90 cm con caja de
   colisión, y las criaturas brotan sobre la losa, delante de la piedra.
-- **Manchas de hierba alta** (`tall_grass`, 16 manchas): el triple de matas, solo las variedades
-  altas y a mayor escala, para que se vea de lejos que ahí cabe alguien.
+- **Tres alturas de hierba** (petición del usuario, 2026-09-17; `MapLayout.grass_tier`):
+  **alta** (`tall_grass`, 16 manchas de hasta 3 celdas de radio): el triple de matas, solo las
+  variedades altas y a escala 1,0-1,5, para que se vea de lejos que ahí cabe alguien — y es la única
+  donde te escondes; **media** (`mid_grass`, 22 manchas de hasta 5 celdas): por la cintura, escala
+  0,75-1,05 y densidad intermedia, **solo paisaje: no esconde a nadie**; y **matas bajas** en el
+  resto de la pradera (0,45-0,8).
+- **Eriales** (7 manchas, zona 3 de `zones`): tierra pelada con guijarros y algún matojo seco, sin
+  hierba, y las rocas del mapa que caen ahí salen de roca en vez de árbol. Da mezcla de pasto, tierra
+  y roca sin tocar el generador del 2D: las manchas se marcan en el 3D, antes de construir el suelo
+  (de ahí salen el color del terreno, los bloqueadores y la decoración). **Solo guijarros de adorno**:
+  una `Rock_Medium` decorativa se ve como un peñasco pero no tiene colisión y las criaturas la
+  atravesaban (lo cazó `rocks_probe`). Las manchas se sortean con su PROPIO generador aleatorio: si
+  gastaran del sorteo de la partida moverían los peñascos de cobertura, que se eligen después.
 - **Agacharse con Ctrl**: frena al 45 %, baja la cámara y usa las animaciones `Crouch_Idle` /
   `Crouch_Fwd` del pack. Agachado **dentro de una mancha de hierba alta eres invisible** para las
   criaturas; atacar te delata 3 s (`SPOTTED_TIME`). En táctil, el botón **▼ Agacharse** junto al
@@ -508,6 +600,11 @@ lo que bloquea), y el mapa se redibuja 20 veces por segundo, no en cada fotogram
   - Medido con dos bots quietos en el centro: la primera detección llega a los ~25 s y la oleada 1
     se limpia en ~85 s. `tests/senses_probe.gd` comprueba que cada detección cumple las reglas, que el
     grito no pasa de 30 m y que las que deambulan se mueven.
+- **La horda aprieta** (2026-09-17): una criatura que lleva **20 s deambulando sin ver a nadie**
+  (`CreatureSenses.HUNT_AFTER`) se lanza hacia la leyenda más cercana. Sin eso, una sola criatura
+  perdida en una esquina dejaba la oleada sin acabar nunca —lo cazó `horde_probe` al cambiar el
+  terreno— y la horda no presionaba: con la correa, un equipo de 4 bots pasa de 27 a 59 bajas en los
+  mismos 120 s.
 
 ## Premios de racha
 
@@ -515,6 +612,12 @@ Las 10 insignias del juego (`hud.KILL_REWARD_NAMES`, no existe la 2), con sus mi
 misma presentación. Insignia 1 en la primera baja, de la 3 a la 9 por racha, 10 y 11 ("La parca")
 al llegar a 10 bajas. La racha se pierde al morir. **Diferencia con el juego**: aquí no hay rotación
 de "La parca" porque solo juegas tú, así que el título se gana por bajas totales.
+
+**Dónde y cómo suenan** (peticiones del usuario, 2026-09-17): la insignia sale **justo debajo de tu
+leyenda** (antes tapaba sus piernas) y en el centro de abajo, que está libre —el joystick va a la
+izquierda y las habilidades a la derecha—; y **se oye**: `badge.wav` a volumen pleno más un golpe de
+campana que sube con la racha (antes sonaba a −4 dB y pasaba desapercibida). Para verla y oírla sin
+jugar: `--badge=3`.
 
 ## Controles
 
@@ -564,12 +667,16 @@ Ver `assets/CREDITS.txt`. Resumen de lo que ata:
 ```
 --near=5        las criaturas salen a 5 celdas de ti, para pelear ya
 --zombies=N     tamaño de la oleada
+--win-now       (horde_probe) barre la última oleada para comprobar la victoria
 --wave=N        empezar en la oleada N
 --nodecor       sin hierba ni flores
 --noshadow      sin sombras
 --log           traza por consola (headless)
 --bench         FPS y tiempos por fotograma
 --fxtest        mantiene rayos, una esfera y la trampa o baliza de tu leyenda puestas, para juzgar los efectos
+--poseanim=N    fija esa animación en tu leyenda (Crawl_Fwd, Jog_Left, Idle_Tired...) para juzgarla en
+                una captura; con --roster, la hacen las siete leyendas en fila
+--badge=N       enseña la insignia de racha N al empezar (sitio y sonido)
 --sporelog      traza el contagio y el daño creciente de la plaga del Clérigo
 --dashlog       mide si el Corte de hacha recorre lo que debe y a quién arrolla
 --meleelog      radio, apertura y a cuántos tocó cada golpe cuerpo a cuerpo, y cada tirón del ancla
@@ -586,6 +693,8 @@ Ver `assets/CREDITS.txt`. Resumen de lo que ata:
 --down-player=S (horde_probe) te tumba a ti a los S s, para probar la derrota sin depender del balance
 --down-decoys   (decoy_probe) derriba a la Ilusionista en cuanto tenga un señuelo, para ver si la copian
 --expect-defeat (horde_probe) la partida tiene que acabar en derrota antes de --secs
+--seed=N        cambia el sorteo de la partida (leyendas, decoración) sin mover el mapa: sirve para medir
+                varias partidas distintas del mismo escenario (sin el flag, la de siempre: 1234)
 --rounds=N      rondas para ganar la partida (por defecto 2: al mejor de 3)
 --roundtime=S   tope de una ronda (por defecto 150 s)
 --autocast      en la Horda, lanza solo lo que esté listo hacia la criatura más cercana

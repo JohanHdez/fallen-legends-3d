@@ -99,6 +99,7 @@ PROBES=(
   "minimap_probe --team=2 --autoplay --near=8 --zombies=20 --secs=45"
   "horde_probe --team=4 --autoplay --down-one=20 --secs=120"
   "horde_probe --team=1 --autoplay --down-player=15 --expect-defeat --secs=40"
+  "horde_probe --team=4 --wave=5 --autoplay --near=6 --secs=90"
   "boss_probe --team=4 --autoplay --near=4 --zombies=0 --boss --secs=120"
   "senses_probe --team=2 --autoplay --near=8 --zombies=20 --secs=90"
   "senses_probe --team=1 --near=6 --zombies=14 --nozone --hide --secs=60"

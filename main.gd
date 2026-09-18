@@ -19,8 +19,15 @@ const WALL_H := 7.0      # alto de la colisión de los muros
 const MAP_SEED := 1234
 const GRASS_FIELDS := 16       # manchas de hierba alta donde esconderse agachado
 const GRASS_RADIUS := 3        # celdas de radio de cada mancha
+# Hierba MEDIA (por la cintura) y eriales de tierra y roca: petición del usuario (2026-09-17),
+# "zonas con pasto a la mitad de los personajes, otras con pasto alto, otra combinado pasto, tierra,
+# rocas". La media NO esconde a nadie (eso es solo la alta): es puro paisaje.
+const MID_FIELDS := 22         # manchas de hierba media
+const MID_RADIUS := 5
+const DIRT_FIELDS := 7         # eriales: tierra pelada con piedras
+const DIRT_RADIUS := 4
 const COVER_ROCKS := 50        # peñascos sueltos por el campo, para cubrirse (uno por celda despejada)
-const COVER_RADIUS := 1.3      # radio de la huella de un peñasco: cabe en su celda de 3 m con holgura
+const COVER_RADIUS := 1.05     # radio de la huella de un peñasco: cabe en su celda de 3 m con holgura
 const COVER_STRETCH := 1.4     # estirado en vertical, para que tape a alguien de pie (~1,7-2 m)
 const COVER_GAP := 2           # celdas (Chebyshev) entre peñascos
 const WALL_ROCK_TOL := 0.1     # roca de muro: lo que puede asomar hacia el suelo (media celda = 1,5)
@@ -60,7 +67,6 @@ const WAVE_BREAK := 4.0
 const FLOW_EVERY := 0.4        # cada cuánto se recalcula el campo de flujo
 
 # Jefe: el Rompemareas (Tidebreaker) en vez del dragón, que en el juego sigue siendo 2D.
-const BOSS_WAVE := 5           # sale en esta oleada y en sus múltiplos
 
 # --- poderes del Tormentero, con los números reales de data/abilities/*.tres ---
 # El juego mide en píxeles: una celda son 192 px y aquí 3 m, así que 1 px = 1,5625 cm.
@@ -144,6 +150,11 @@ const FOREST := ["CommonTree_1", "CommonTree_2", "CommonTree_3", "CommonTree_4",
 	"Pine_1", "Pine_2", "Pine_3", "Pine_4", "Pine_5",
 	"TwistedTree_1", "TwistedTree_2", "TwistedTree_3"]
 const CAVE_ROCK := ["Rock_Medium_1", "Rock_Medium_2", "Rock_Medium_3"]
+# Solo guijarros y matojos: una Rock_Medium de adorno se ve como un peñasco pero NO tiene colisión,
+# y las criaturas la atravesaban (lo cazó tests/rocks_probe.gd). Los peñascos de verdad son los de
+# cobertura y los de muro.
+const DIRT_DECOR := ["Pebble_Round_1", "Pebble_Round_3", "Pebble_Square_1", "Pebble_Square_4",
+	"Pebble_Square_5", "Grass_Wispy_Short"]
 const BONEYARD := ["DeadTree_1", "DeadTree_2", "DeadTree_3", "DeadTree_4", "DeadTree_5"]
 
 const FIELD_DECOR := ["Grass_Common_Short", "Grass_Common_Tall", "Grass_Wispy_Short", "Grass_Wispy_Tall",
@@ -153,8 +164,10 @@ const CAVE_DECOR := ["Pebble_Round_1", "Pebble_Round_3", "Pebble_Square_2", "Peb
 	"Mushroom_Laetiporus"]
 const GRAVE_DECOR := ["Grass_Wispy_Short", "Pebble_Square_1", "Pebble_Square_4", "Mushroom_Common"]
 
-# Colores del suelo por zona: pradera, roca de cueva, tierra de cementerio.
-const GROUND := [Color(0.26, 0.37, 0.19), Color(0.26, 0.26, 0.28), Color(0.32, 0.29, 0.23)]
+# Colores del suelo por zona: pradera, roca de cueva, tierra de cementerio y erial (tierra pelada).
+const GROUND := [Color(0.26, 0.37, 0.19), Color(0.26, 0.26, 0.28), Color(0.32, 0.29, 0.23),
+	Color(0.38, 0.31, 0.21)]
+const DIRT_ZONE := 3           # valor de `zones` del erial
 
 var grid: Array                   # [x][y], transpuesta de la de MapBuilder (ver _ready)
 var zones: Array
@@ -162,6 +175,7 @@ var _mb_grid: Array               # [y][x], la de MapBuilder tal cual: para sus 
 var _mb_zones: Array
 var _cover_cells := {}            # Vector2i -> true: celdas ocupadas por un peñasco de cobertura
 var tall_grass: Array             # [x][y] true = hierba alta: agachado ahí no te ven
+var mid_grass: Array              # [x][y] true = hierba media: solo se ve, no esconde
 var mw := 0
 var mh := 0
 var rng := RandomNumberGenerator.new()
@@ -256,6 +270,9 @@ var _orders_hold := -1.0           # F mantenida para las órdenes del Rey liche
 var touch := false
 var touch_ui: Control = null
 var minimap: Minimap = null
+var show_fps := false             # contador de FPS de la esquina (se enciende desde la pausa)
+var _fps_label: Label = null
+var _fps_t := 0.0
 var _joy_idx := -1
 var _joy_origin := Vector2.ZERO
 var _joy_vec := Vector2.ZERO
@@ -275,7 +292,16 @@ func _ready() -> void:
 	touch = OS.has_feature("mobile") or OS.has_feature("web_ios") or OS.has_feature("web_android") \
 		or real_touchscreen or _args.has("touch")
 	_mode = _pick_mode()
-	rng.seed = MAP_SEED
+	if touch:
+		# El S24 Ultra y compañía van a 120 Hz: sin tope, el juego intenta 120 y se le nota el tirón
+		# cuando no llega. A 60 el fotograma es estable y gasta la mitad de batería (petición del
+		# usuario, 2026-09-17: "los FPS mínimo 30, ideal 60").
+		Engine.max_fps = 60
+	show_fps = bool(Engine.get_meta("fl_fps", false))
+	# `--seed=N` cambia el sorteo de la partida (reparto de leyendas, decoración, esquivas) SIN mover
+	# el mapa, que sigue saliendo de MAP_SEED: así se pueden medir varias partidas distintas del mismo
+	# escenario. Sin el flag, la semilla es la de siempre y las trazas deterministas no cambian.
+	rng.seed = int(_args["seed"]) if String(_args.get("seed", "")).is_valid_int() else MAP_SEED
 	vfx = Vfx.new(self, rng, touch)
 	combat = Combat.new(self, vfx)
 	var t0 := Time.get_ticks_msec()
@@ -293,9 +319,10 @@ func _ready() -> void:
 	print("mapa %dx%d generado con el MISMO map_builder.gd del juego" % [mw, mh])
 
 	_setup_environment()
+	_mark_dirt_fields()        # antes del suelo: el erial le cambia el color y la decoración
 	_build_ground()
 	_build_blockers()
-	_build_grass_fields()      # antes que la decoración: decide dónde va la hierba alta
+	_build_grass_fields()      # antes que la decoración: decide dónde va la hierba alta y la media
 	if not _args.has("nodecor"):
 		_scatter_cover()           # antes que la decoración: su celda deja de ser suelo
 		_scatter_decor()
@@ -411,6 +438,9 @@ func _apply_cam_args() -> void:
 	if _args.has("cd"):
 		combat.cd_cap = maxf(float(_args["cd"]), 0.1)
 		print("recargas recortadas a %.1f s (solo prueba)" % combat.cd_cap)
+	if _args.has("badge"):
+		# Enseña una insignia de racha al empezar, para juzgar su sitio y su sonido en una captura.
+		_show_badge(int(_args["badge"]) if String(_args["badge"]).is_valid_int() else 1)
 	if _args.has("dianas") and horde != null:
 		var n := int(_args["dianas"]) if String(_args["dianas"]).is_valid_int() else 4
 		horde.spawn_targets(n)
@@ -431,7 +461,7 @@ func _show_roster() -> void:
 		n.position = base + Vector3((i - (PLAYABLE - 1) * 0.5) * 2.0, 0.0, 3.5)
 		n.rotation.y = PI
 		add_child(n)
-		_play_all(made.get("anims", []), "Idle", i * 0.3)
+		_play_all(made.get("anims", []), String(_args.get("poseanim", "Idle")), i * 0.3)
 		var lbl := Label3D.new()
 		lbl.text = LEGENDS[i]["name"]
 		lbl.font_size = 96
@@ -587,7 +617,7 @@ func _build_blockers() -> void:
 				continue
 			var z: int = zones[x][y]
 			var pool: Array = FOREST
-			if cell == MapBuilder.MOUNTAIN or z == 1:
+			if cell == MapBuilder.MOUNTAIN or z == 1 or z == DIRT_ZONE:
 				pool = CAVE_ROCK
 			elif z == 2:
 				pool = BONEYARD
@@ -804,33 +834,91 @@ func _zone_hud() -> String:
 
 ## Manchas de hierba CRECIDA repartidas por el campo. Marcarlas en `tall_grass` es lo que hace
 ## que el camuflaje sepa dónde vale: agachado dentro de una, las criaturas te pierden.
+## Eriales: manchas de tierra pelada con piedras (petición del usuario, 2026-09-17). Van antes de
+## construir el suelo porque le cambian el color y la decoración. Sorteo PROPIO, no el de la partida:
+## gastar del general movía todo lo que viene después y los peñascos de cobertura acababan encima de
+## las criaturas (lo cazó tests/rocks_probe.gd).
+func _mark_dirt_fields() -> void:
+	var cells := _spread(_terrain_rng(7), null, DIRT_FIELDS, 2, DIRT_RADIUS, [])
+	print("erial: %d celdas de tierra y piedra" % cells)
+
+
+## Un sorteo aparte para el terreno decorativo, siempre el mismo (el mapa es el mismo).
+func _terrain_rng(salt: int) -> RandomNumberGenerator:
+	var r := RandomNumberGenerator.new()
+	r.seed = MAP_SEED + 991 + salt * 131
+	return r
+
+
 func _build_grass_fields() -> void:
-	tall_grass = []
+	tall_grass = _empty_map()
+	mid_grass = _empty_map()
+	# La hierba ALTA sigue saliendo del sorteo de la partida, en el mismo momento y con el mismo mapa
+	# de zonas de siempre (sin eriales): es la que esconde, y moverla movería los peñascos de
+	# cobertura, que la evitan. Si una mancha cae sobre un erial, allí crece hierba igual.
+	var tall := _spread(rng, tall_grass, GRASS_FIELDS, 2, GRASS_RADIUS, [], _zones_without_dirt())
+	# La MEDIA es solo paisaje y va con su propio sorteo. Puede tocar la alta: donde coinciden manda
+	# la alta (MapLayout.grass_tier).
+	var mid := _spread(_terrain_rng(3), mid_grass, MID_FIELDS, 3, MID_RADIUS, [])
+	print("hierba: %d celdas altas, %d medias" % [tall, mid])
+
+
+## Copia de `zones` con los eriales otra vez como pradera.
+func _zones_without_dirt() -> Array:
+	var out: Array = []
+	for x in mw:
+		var col := []
+		col.resize(mh)
+		for y in mh:
+			col[y] = 0 if int(zones[x][y]) == DIRT_ZONE else zones[x][y]
+		out.append(col)
+	return out
+
+
+## Un mapa [x][y] de false del tamaño del mapa.
+func _empty_map() -> Array:
+	var m: Array = []
 	for x in mw:
 		var col := []
 		col.resize(mh)
 		col.fill(false)
-		tall_grass.append(col)
+		m.append(col)
+	return m
+
+
+## Reparte `n` manchas redondas por el campo. Si `into` es null, la mancha marca erial en `zones`;
+## si no, pone true en ese mapa. `avoid` son mapas donde no puede caer. Devuelve las celdas marcadas.
+func _spread(r: RandomNumberGenerator, into, n: int, r_min: int, r_max: int, avoid: Array,
+		zmap: Array = []) -> int:
+	var zs: Array = zmap if not zmap.is_empty() else zones
 	var placed := 0
 	var cells := 0
-	for i in GRASS_FIELDS * 8:
-		if placed >= GRASS_FIELDS:
+	for i in n * 8:
+		if placed >= n:
 			break
-		var cx := rng.randi_range(3, mw - 4)
-		var cy := rng.randi_range(3, mh - 4)
-		if not MapBuilder.walkable(grid[cx][cy]) or zones[cx][cy] != 0:
+		var cx := r.randi_range(3, mw - 4)
+		var cy := r.randi_range(3, mh - 4)
+		if not MapBuilder.walkable(grid[cx][cy]) or int(zs[cx][cy]) != 0:
 			continue
-		var r := rng.randi_range(2, GRASS_RADIUS)
-		for x in range(maxi(cx - r, 0), mini(cx + r + 1, mw)):
-			for y in range(maxi(cy - r, 0), mini(cy + r + 1, mh)):
-				if Vector2(x - cx, y - cy).length() > r + 0.3:
+		var rad := r.randi_range(r_min, r_max)
+		for x in range(maxi(cx - rad, 0), mini(cx + rad + 1, mw)):
+			for y in range(maxi(cy - rad, 0), mini(cy + rad + 1, mh)):
+				if Vector2(x - cx, y - cy).length() > rad + 0.3:
 					continue
-				if not MapBuilder.walkable(grid[x][y]) or zones[x][y] != 0 or tall_grass[x][y]:
+				if not MapBuilder.walkable(grid[x][y]) or int(zs[x][y]) != 0:
 					continue
-				tall_grass[x][y] = true
+				var busy := false
+				for m in avoid:
+					busy = busy or bool((m as Array)[x][y])
+				if busy or (into != null and bool((into as Array)[x][y])):
+					continue
+				if into == null:
+					zones[x][y] = DIRT_ZONE
+				else:
+					(into as Array)[x][y] = true
 				cells += 1
 		placed += 1
-	print("hierba alta: %d manchas, %d celdas" % [placed, cells])
+	return cells
 
 
 ## Peñascos sueltos por el campo para cubrirse. Antes eran rocas a escala 1,4-2,1 (4,5-7 m de ancho)
@@ -847,7 +935,10 @@ func _scatter_cover() -> void:
 	body.collision_mask = 0
 	add_child(body)
 	var by_model := {}
-	var cells := MapLayout.pick_cover_cells(grid, zones, tall_grass, _spawn_cell(), COVER_ROCKS, COVER_GAP, rng)
+	# Los eriales no cuentan para elegir dónde va un peñasco: si contaran, cambiarían las celdas
+	# elegidas y con ellas el encaje de cada roca (tests/rocks_probe.gd).
+	var cells := MapLayout.pick_cover_cells(grid, _zones_without_dirt(), tall_grass, _spawn_cell(),
+		COVER_ROCKS, COVER_GAP, rng)
 	for c in cells:
 		var name := "Rock_Medium_%d" % (1 + rng.randi() % 3)
 		var shape := _rock_shape(NATURE + name + ".gltf")
@@ -909,6 +1000,8 @@ func _scatter_decor() -> void:
 				pool = CAVE_DECOR
 			elif z == 2:
 				pool = GRAVE_DECOR
+			elif z == DIRT_ZONE:
+				pool = DIRT_DECOR
 			var name: String = pool[rng.randi() % pool.size()]
 			var xf := Transform3D.IDENTITY
 			xf = xf.rotated(Vector3.UP, rng.randf() * TAU)
@@ -922,22 +1015,31 @@ func _scatter_decor() -> void:
 
 ## Matas de hierba a manta sobre el campo: sin esto el suelo se ve como una moqueta lisa.
 func _scatter_grass(by_model: Dictionary) -> void:
+	var r := _terrain_rng(11)   # las matas no gastan del sorteo de la partida (ver _mark_dirt_fields)
 	var tufts := ["Grass_Common_Short", "Grass_Common_Tall", "Grass_Wispy_Short", "Grass_Wispy_Tall"]
+	var tall_pool := ["Grass_Common_Tall", "Grass_Wispy_Tall"]
 	for x in mw:
 		for y in mh:
-			if not MapBuilder.walkable(grid[x][y]) or zones[x][y] != 0:
+			if not MapBuilder.walkable(grid[x][y]):
 				continue
-			# En una mancha de hierba alta: el triple de matas, solo las variedades altas y a
-			# mayor escala. Tiene que verse de lejos que ahí dentro cabe alguien.
-			var field: bool = not tall_grass.is_empty() and tall_grass[x][y]
-			var pool: Array = ["Grass_Common_Tall", "Grass_Wispy_Tall"] if field else tufts
-			var count: int = (6 if touch else 12) if field else (2 if touch else 4)
+			# Tres alturas (petición del usuario, 2026-09-17): alta donde te escondes agachado (el
+			# triple de matas, solo variedades altas y a mayor escala: tiene que verse de lejos que
+			# ahí cabe alguien), MEDIA por la cintura —solo paisaje, no esconde— y matas bajas.
+			var tier := MapLayout.grass_tier(not tall_grass.is_empty() and tall_grass[x][y],
+				not mid_grass.is_empty() and mid_grass[x][y])
+			# Fuera de la pradera (cueva, cementerio, erial) solo crece donde cayó una mancha alta.
+			if int(zones[x][y]) != 0 and tier != 2:
+				continue
+			var pool: Array = tall_pool if tier == 2 else tufts
+			var count: int = [(2 if touch else 4), (4 if touch else 7), (6 if touch else 12)][tier]
+			var lo: float = [0.45, 0.75, 1.0][tier]
+			var hi: float = [0.8, 1.05, 1.5][tier]
 			for i in count:
 				var xf := Transform3D.IDENTITY
-				xf = xf.rotated(Vector3.UP, rng.randf() * TAU)
-				xf = xf.scaled(Vector3.ONE * (rng.randf_range(1.0, 1.5) if field else rng.randf_range(0.45, 0.8)))
-				xf.origin = _cell_pos(x, y) + Vector3(rng.randf_range(-1.4, 1.4), 0, rng.randf_range(-1.4, 1.4))
-				by_model.get_or_add(pool[rng.randi() % pool.size()], []).append(xf)
+				xf = xf.rotated(Vector3.UP, r.randf() * TAU)
+				xf = xf.scaled(Vector3.ONE * r.randf_range(lo, hi))
+				xf.origin = _cell_pos(x, y) + Vector3(r.randf_range(-1.4, 1.4), 0, r.randf_range(-1.4, 1.4))
+				by_model.get_or_add(pool[r.randi() % pool.size()], []).append(xf)
 
 
 ## Las 6 tumbas que el juego coloca en el cementerio: losa plana y lápida de pie. La lápida medía
@@ -1518,10 +1620,14 @@ func _sfx(name: String, vol := -6.0) -> void:
 			_sfx_pool.append(p)
 	if not _sfx_cache.has(name):
 		var st: AudioStream = null
-		for ext in [".wav", ".ogg"]:
-			var path := "res://assets/audio/spells/%s%s" % [name, ext]
-			if ResourceLoader.exists(path):
-				st = load(path)
+		# Primero los sonidos de habilidad y, si no está, los golpes de Kenney (assets/audio/sfx).
+		for folder in ["spells", "sfx"]:
+			for ext in [".wav", ".ogg"]:
+				var path := "res://assets/audio/%s/%s%s" % [folder, name, ext]
+				if ResourceLoader.exists(path):
+					st = load(path)
+					break
+			if st != null:
 				break
 		if st == null:
 			st = load("res://assets/audio/sfx/impactPunch_heavy_001.ogg") if \
@@ -2204,6 +2310,30 @@ func _build_hud() -> void:
 	cross.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	cross.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	layer.add_child(cross)
+	# Contador de FPS para probar en el móvil (se enciende en la pausa y se recuerda entre partidas).
+	_fps_label = Label.new()
+	_fps_label.position = Vector2(88, 44)
+	_fps_label.add_theme_font_size_override("font_size", 22)
+	_fps_label.add_theme_color_override("font_color", Color(0.7, 1.0, 0.7))
+	_fps_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	_fps_label.add_theme_constant_override("outline_size", 5)
+	_fps_label.visible = show_fps
+	layer.add_child(_fps_label)
+
+
+## Enciende o apaga el contador de FPS (botón de la pausa). Se recuerda para la partida siguiente.
+func set_fps_visible(on: bool) -> void:
+	show_fps = on
+	Engine.set_meta("fl_fps", on)
+	if _fps_label != null:
+		_fps_label.visible = on
+
+
+## Hacia dónde mira la cámara, en el plano: es a donde apunta tu leyenda.
+func cam_forward() -> Vector3:
+	var f := -cam.global_transform.basis.z
+	f.y = 0.0
+	return f.normalized() if f.length() > 0.01 else Vector3(0, 0, 1)
 
 
 func _apply_cam_mode() -> void:
@@ -2428,11 +2558,14 @@ func _show_badge(badge: int) -> void:
 		_badge_img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		_badge_img.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		layer.add_child(_badge_img)
+		# Debajo del personaje (petición del usuario, 2026-09-17): antes salía a la altura de sus
+		# piernas y se confundía con la pelea. El centro de abajo está libre: el joystick va a la
+		# izquierda y las habilidades a la derecha.
 		_badge_img.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 		_badge_img.offset_left = -64
-		_badge_img.offset_top = -300
+		_badge_img.offset_top = -214
 		_badge_img.offset_right = 64
-		_badge_img.offset_bottom = -172
+		_badge_img.offset_bottom = -86
 		_badge_img.pivot_offset = Vector2(64, 64)
 		_badge_cap = Label.new()
 		_badge_cap.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -2455,7 +2588,10 @@ func _show_badge(badge: int) -> void:
 	_badge_img.show()
 	_badge_img.modulate = Color(1.4, 1.2, 1.0, 1.0)
 	_badge_img.scale = Vector2.ONE * 1.25
-	_sfx("badge", -4.0 - float(badge - 1) * 0.3)
+	# Se tiene que OÍR (petición del usuario, 2026-09-17: antes sonaba a -4 dB y pasaba desapercibido):
+	# el sonido de la insignia a volumen pleno y, encima, un golpe de campana que sube con la racha.
+	_sfx("badge", 0.0)
+	_sfx("impactBell_heavy_%03d" % mini(badge - 1, 4), -3.0)
 	_badge_tween = create_tween()
 	_badge_tween.set_parallel(true)
 	_badge_tween.tween_property(_badge_img, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
@@ -2503,6 +2639,16 @@ func _process(_d: float) -> void:
 					print("captura: ", _shot)
 				get_tree().quit()
 		return
+	# --poseanim=Nombre: fija esa animación en tu leyenda para juzgarla en una captura (prueba).
+	if _args.has("poseanim") and pf != null and pf.anim != null:
+		var pose := String(_args["poseanim"])
+		if pf.anim.has_animation(pose) and pf.anim.current_animation != pose:
+			_play_all(pf.anims, pose)
+	if _fps_label != null and show_fps:
+		_fps_t -= _d
+		if _fps_t <= 0.0:
+			_fps_t = 0.25
+			_fps_label.text = "%d FPS · %d criaturas" % [Engine.get_frames_per_second(), zombies.size()]
 	if touch_ui != null:
 		touch_ui.queue_redraw()
 	if _args.has("fxtest") and player != null:
@@ -2595,17 +2741,18 @@ func _process(_d: float) -> void:
 	var cy := int(round(player.global_position.z / CELL + mh * 0.5))
 	var zone := "campo"
 	if cx >= 0 and cx < mw and cy >= 0 and cy < mh:
-		zone = ["campo", "cueva", "cementerio"][zones[cx][cy]]
+		# Un nombre por zona, erial incluido: sin él, el HUD reventaba cada fotograma al pisar tierra.
+		zone = ["campo", "cueva", "cementerio", "erial"][clampi(int(zones[cx][cy]), 0, 3)]
 	var estado := "CAÍDO" if _php <= 0.0 else "vida %d/%d" % [int(_php), int(pf.hp_max())]
 	var oculto := ""
 	if pf.crouch:
 		oculto = "  ·  AGACHADO" + ("  ·  OCULTO" if player_hidden() else "")
-	hud.text = ("%s  ·  OLEADA %d   ·   criaturas vivas %d   ·   por salir %d   ·   bajas %d   ·   %s%s\n"
+	hud.text = ("%s  ·  OLEADA %d/%d   ·   criaturas vivas %d   ·   por salir %d   ·   bajas %d   ·   %s%s\n"
 		+ "%d FPS   |   %d props   |   celda %d,%d (%s)%s\n"
 		+ "%s   %s   %s\n"
 		+ "clic izq / Q · clic der o E (mantener para ver el radio) · R definitiva\n"
 		+ "WASD mover · Shift correr · Ctrl agacharse · ratón girar · rueda zoom · C cámara · Esc ratón · F10 salir") % [
-		String(LEGENDS[_legend]["name"]), horde.wave if horde != null else 0, zombies.size(),
+		String(LEGENDS[_legend]["name"]), horde.wave if horde != null else 0, Horde.WAVES, zombies.size(),
 		horde.left_to_spawn if horde != null else 0, _kills, estado, oculto,
 		Engine.get_frames_per_second(), _props, cx, cy, zone, _zone_hud(),
 		_slot(0), _slot(1), _slot(2)]

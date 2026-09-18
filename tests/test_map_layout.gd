@@ -21,6 +21,7 @@ func _init() -> void:
 	_test_fit()
 	_test_fit_in_cell()
 	_test_cover_cells()
+	_test_grass_tier()
 	print("test_map_layout: %s (%d fallos)" % ["OK" if failures == 0 else "FALLO", failures])
 	quit(1 if failures > 0 else 0)
 
@@ -168,3 +169,11 @@ func _test_cover_cells() -> void:
 	_check(MapBuilder.all_connected(grid), "con peñascos el mapa deja de ser conexo")
 	_check(MapBuilder.dead_end_cells(grid).is_empty(), "con peñascos aparecen callejones: %s" % [MapBuilder.dead_end_cells(grid)])
 	_check(MapBuilder.trapped_cells(grid).is_empty(), "con peñascos aparecen bolsas: %s" % [MapBuilder.trapped_cells(grid)])
+
+
+## Tres alturas de hierba: alta (esconde), media (solo se ve) y baja.
+func _test_grass_tier() -> void:
+	_check(MapLayout.grass_tier(false, false) == 0, "sin mancha: matas bajas")
+	_check(MapLayout.grass_tier(false, true) == 1, "mancha media: hierba por la cintura")
+	_check(MapLayout.grass_tier(true, false) == 2, "mancha alta: hierba para esconderse")
+	_check(MapLayout.grass_tier(true, true) == 2, "si coinciden, manda la alta")

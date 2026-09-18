@@ -51,6 +51,8 @@ var windup := -1.0                     # preaviso en curso (cast_time), como Cas
 var windup_idx := -1
 var windup_at := Vector3.ZERO
 var cast_anim_t := 0.0                 # mientras corre, la animación de conjuro manda sobre andar
+var hit_anim_t := 0.0                  # queja por un golpe: mientras corre, manda sobre andar
+var hit_anim_cd := 0.0                 # y no encadena quejas (Combat.HIT_ANIM_EVERY)
 
 var buff_left := 0.0
 var buff_resist := 0.0

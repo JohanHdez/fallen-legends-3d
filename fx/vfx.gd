@@ -10,8 +10,9 @@ const SPARK := Color(0.62, 0.80, 1.0)
 # --- esferas de las trampas puestas (petición del usuario, 2026-09-17) ---
 const ORB_R := 0.30                   # radio del núcleo de la esfera eléctrica
 const ORB_H := 0.95                   # a qué altura flota
-const ORB_ARMS := 4                   # brazos de plasma que le saltan alrededor
+const ORB_ARMS := 10                  # brazos de plasma que le saltan alrededor (finos y muchos)
 const ORB_SEGS := 3                   # tramos de cada brazo
+const ORB_ON := 0.55                  # cuántos de esos brazos se encienden en cada paso
 const ORB_STEP := 0.09                # cada cuánto se rehacen los brazos (s)
 const NOX_R := 0.42                   # radio de la esfera de la Baliza Nox, apoyada en el suelo
 
@@ -202,8 +203,8 @@ func electric_orb(color: Color) -> Node3D:
 	var arms := Node3D.new()
 	arms.name = "Arms"
 	var bolt := CylinderMesh.new()
-	bolt.top_radius = 0.035
-	bolt.bottom_radius = 0.035
+	bolt.top_radius = 0.016
+	bolt.bottom_radius = 0.016
 	bolt.height = 1.0
 	bolt.radial_segments = 4
 	var mat := _glow(Color(minf(color.r + 0.3, 1.0), minf(color.g + 0.3, 1.0), 1.0), 1.0)
@@ -217,7 +218,8 @@ func electric_orb(color: Color) -> Node3D:
 
 
 ## Esfera de la Baliza Nox apoyada en el suelo (petición del usuario, 2026-09-17; antes era un poste):
-## una bola turbia que, al activarse, se enciende y empieza a echar humo.
+## una bola turbia a secas. Llevaba humo saliendo al activarse y el usuario lo quitó: "no generes 3
+## bolas arriba, me parece innecesario". Activarse se nota en que la bola crece y late (tick_orb).
 func nox_orb(color: Color) -> Node3D:
 	var root := Node3D.new()
 	var core := MeshInstance3D.new()
@@ -236,11 +238,6 @@ func nox_orb(color: Color) -> Node3D:
 	m.roughness = 0.45
 	core.material_override = m
 	root.add_child(core)
-	var smoke := emitter(root, "smoke_04", Color(color.r * 0.75, color.g, color.b * 0.45, 0.5), NOX_R * 0.8,
-		14, 1.8, 0.6, 0.5)
-	smoke.name = "Smoke"
-	smoke.position = Vector3(0, NOX_R, 0)
-	smoke.emitting = false                 # humo solo cuando se activa
 	return root
 
 
@@ -272,13 +269,20 @@ func _plasma(arms: Node3D, k: float, live: bool) -> void:
 		return
 	var n := 0
 	for i in ORB_ARMS:
+		# Cada paso se encienden unos y se apagan otros: es lo que lo lee como electricidad y no como
+		# una estrella fija (petición del usuario, 2026-09-17). El sorteo es una función del reloj, no
+		# del `rng`, para no tocar las trazas deterministas.
+		var on: bool = fposmod(sin(k * 12.9898 + i * 78.233) * 43758.5453, 1.0) < ORB_ON
 		var a := TAU * i / ORB_ARMS + k * 0.7
 		var dir := Vector3(cos(a), sin(k * 1.3 + i * 2.1) * 0.6, sin(a)).normalized()
 		var prev := dir * ORB_R
 		for s in range(1, ORB_SEGS + 1):
 			var p := dir * (ORB_R + s * 0.17) + Vector3(
 				sin(k * 3.1 + s * 2.3 + i), cos(k * 2.7 + s * 1.7 + i), sin(k * 4.3 + s * 1.1 - i)) * 0.10
-			span(arms.get_child(n) as MeshInstance3D, prev, p)
+			var mi := arms.get_child(n) as MeshInstance3D
+			mi.visible = on
+			if on:
+				span(mi, prev, p)
 			prev = p
 			n += 1
 

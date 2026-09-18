@@ -12,6 +12,8 @@
 class_name Minions
 extends RefCounted
 
+const ORDER_ANIM := "Idle_Rail_Call"   # el gesto con el que llama a sus esqueletos
+const ORDER_ANIM_TIME := 1.1          # comprimida de sus 2,5 s: una orden es un gesto corto
 const ORDERS := ["attack", "regroup", "ambush"]
 const ORDER_NAMES := {"attack": "Atacar", "regroup": "Reagrupar", "ambush": "Emboscada"}
 const RING_IN := 2.0
@@ -85,6 +87,8 @@ func set_order(f: Fighter, order: String, at := Vector3.INF) -> void:
 		if order != "ambush" and al.get("hidden", false):
 			_rise(al)
 	if changed:
+		# El gesto de llamarlos (idea del usuario, 2026-09-17): se ve quién está dando la orden.
+		combat.gesture(f, ORDER_ANIM, ORDER_ANIM_TIME)
 		print("[ORDEN] %s manda a sus esqueletos: %s" % [f.display_name, ORDER_NAMES[order]])
 
 

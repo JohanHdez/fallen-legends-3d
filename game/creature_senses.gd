@@ -11,6 +11,10 @@ const HIDDEN_CHASE := 4.0        # escondido, la que ya te persigue: agacharte 2
 const ALERT_RADIUS := 30.0       # el grito de la que te descubre (decisión del usuario)
 const LOSE_AFTER := 3.0          # segundos sin verte hasta ir a buscarte donde te vio
 const SEARCH_TIME := 8.0         # rebuscando antes de volver a deambular
+## Deambular no puede ser eterno: la criatura que lleva esto sin ver a nadie se lanza hacia la leyenda
+## más cercana. Sin esto, una sola criatura perdida en una esquina dejaba la oleada sin acabar nunca
+## (lo cazó tests/horde_probe.gd) y la horda no apretaba.
+const HUNT_AFTER := 20.0
 const WANDER_CELLS := 10         # hasta dónde elige su siguiente meta al deambular
 const CHECK_EVERY := 0.25        # cada cuánto mira (escalonado entre criaturas)
 
@@ -59,3 +63,8 @@ static func los_clear(grid: Array, a: Vector2i, b: Vector2i) -> bool:
 ## ¿Oye el grito? En el plano, a ALERT_RADIUS o menos.
 static func hears(shouter: Vector3, listener: Vector3) -> bool:
 	return Vector2(listener.x - shouter.x, listener.z - shouter.z).length() <= ALERT_RADIUS
+
+
+## ¿Lleva deambulando lo bastante como para ir a buscar a alguien?
+static func hunts(wander_t: float) -> bool:
+	return wander_t >= HUNT_AFTER

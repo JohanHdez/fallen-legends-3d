@@ -152,7 +152,7 @@ func _check_decoys(delta: float) -> void:
 		elif _down_for >= 0.1:
 			any = true
 			var bar: Node3D = al["bar"]
-			if cur != Revive.DOWNED_MOVE and cur != Revive.DOWNED_IDLE:
+			if not cur.begins_with(Revive.DOWNED_STATE):
 				why = "derribada con la animación %s" % cur
 			elif pf.bar != null and bar != null and bar.visible != pf.bar.visible:
 				why = "señuelo con la barra %s y ella sin barra, derribada" % ("a la vista" if bar.visible else "escondida")

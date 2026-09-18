@@ -127,6 +127,15 @@ static func fit_transform(fit: Dictionary, yaw: float, at: Vector3, y_stretch :=
 ##  - y bloquearla no deja ninguna celda de alrededor sin sus dos vías de huida ni en callejón (los
 ##    mismos criterios con los que MapBuilder valida el mapa de la Horda).
 ## Orden sorteado con `rng`: determinista por semilla. No modifica `grid`.
+## Altura de la hierba de una celda (petición del usuario, 2026-09-17: "zonas con pasto a la mitad de
+## los personajes, otras con pasto alto"): 2 = alta (donde te escondes agachado), 1 = media (por la
+## cintura, solo vista) y 0 = matas bajas. La alta manda sobre la media.
+static func grass_tier(tall: bool, mid: bool) -> int:
+	if tall:
+		return 2
+	return 1 if mid else 0
+
+
 static func pick_cover_cells(grid: Array, zones: Array, avoid: Array, home: Vector2i, count: int,
 		gap: int, rng: RandomNumberGenerator) -> Array[Vector2i]:
 	var w := grid.size()

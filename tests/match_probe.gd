@@ -23,6 +23,7 @@ var _down_t := {}            # id -> segundos seguidos derribada (en juego)
 var _stuck_down := ""        # alguien derribado mucho más de lo que permiten las reglas
 var _downs := 0              # derribos vistos
 var _down_ends := {"levantada": [], "muerta": []}   # cuánto duró cada derribo, según cómo acabó
+var _anims := {}             # animaciones de movimiento que se han visto
 
 
 func _ready() -> void:
@@ -47,6 +48,8 @@ func _physics_process(delta: float) -> void:
 		return
 	_t += delta
 	for f in main.combat.fighters:
+		if f.anim != null and f.anim.current_animation != "":
+			_anims[f.anim.current_animation] = true
 		var p: Vector3 = f.pos()
 		var step := Vector2(p.x - _last[f.id].x, p.z - _last[f.id].z).length()
 		if step < 2.0:            # una reaparición no es andar
@@ -110,8 +113,32 @@ func _finish(rules: TeamMatch) -> void:
 	problems.append_array(_rules_bad)
 	if _stuck_down != "":
 		problems.append("%s estuvo derribada más de %.0f s: el derribo no se resuelve" % [_stuck_down, Revive.BLEED_TIME * 2.0])
+	# Con la biblioteca Pro cada dirección tiene su animación (petición del usuario, 2026-09-17): en
+	# una partida entera tienen que salir las cuatro.
+	for a in ["Jog_Fwd", "Jog_Bwd", "Jog_Left", "Jog_Right"]:
+		if not _anims.has(a):
+			problems.append("nadie usó %s: el modelo sigue girando siempre hacia donde anda" % a)
+	# Quejarse al recibir y quedarse encorvada con poca vida (petición del usuario, 2026-09-17).
+	var flinched := false
+	for a in ["Hit_Chest", "Hit_Head", "Hit_Shoulder_L", "Hit_Shoulder_R"]:
+		flinched = flinched or _anims.has(a)
+	if not flinched:
+		problems.append("nadie se quejó al recibir un golpe (falta la animación de daño)")
+	if not _anims.has("Idle_Tired"):
+		problems.append("nadie se quedó encorvado con menos de media vida")
+	# El aviso de media vida tiene que sonar en una partida entera (petición del usuario, 2026-09-17).
+	if main.combat.half_cues == 0:
+		problems.append("nunca sonó el aviso de media vida")
 	if not _ammo_spent:
 		problems.append("nadie gastó munición: la básica no la usa")
+	# Toxina: si jugó un Clérigo y acertó alguna básica, tiene que haber envenenado (petición del
+	# usuario, 2026-09-17).
+	var cleric_hits := 0.0
+	for k in main.combat.damage_by:
+		if String(k).ends_with("básica") and String(k).begins_with("Clérigo"):
+			cleric_hits = float(main.combat.damage_by[k])
+	if cleric_hits > 0.0 and main.combat.toxin_damage <= 0.0:
+		problems.append("el Clérigo acertó %.0f de daño con la básica y no envenenó a nadie" % cleric_hits)
 	var per := []
 	for fid in rules.scores:
 		var s: Dictionary = rules.scores[fid]
@@ -135,6 +162,11 @@ func _finish(rules: TeamMatch) -> void:
 		int(main.combat.casts.get("trap", 0)), main.combat.traps_on_top, main.combat.traps_sprung,
 		int(main.combat.casts.get("beacon", 0)), main.combat.beacons_popped])
 	print("[SONDA] rayos de tormenta: %d" % main.combat.storm_strikes)
+	print("[SONDA] toxina del Clérigo: %.0f de daño · avisos de media vida: %d" % [
+		main.combat.toxin_damage, main.combat.half_cues])
+	var anim_list: Array = _anims.keys()
+	anim_list.sort()
+	print("[SONDA] animaciones vistas: %s" % ", ".join(anim_list))
 	var rv: ReviveSystem = main.team_mode.revive
 	print("[SONDA] derribos: %d · levantados por un compañero %d · muertos por no levantarlos a tiempo %d · duración media: levantada %.1f s, muerta %.1f s" % [
 		_downs, rv.revives, rv.bled_out, _mean(_down_ends["levantada"]), _mean(_down_ends["muerta"])])

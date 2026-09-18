@@ -13,7 +13,10 @@ const PX := 3.0 / 192.0
 const CHARS := "res://models/chars/"
 const OUTFITS := CHARS
 const BESTIARY := CHARS
-const UAL1 := CHARS + "UAL1_Standard.glb"
+# UAL1 Pro (CC0, Quaternius, 2026-09-17): la misma biblioteca con 120 animaciones en vez de 43. Trae
+# las que faltaban para andar de lado y hacia atrás (Jog_Left/Right/Bwd y sus versiones agachadas) y
+# para gatear de verdad (Crawl_*), que sustituyen al apaño de nadar del derribo.
+const UAL1 := CHARS + "UAL1_Pro.glb"
 const UAL2 := CHARS + "UAL2_Standard.glb"
 
 # Especies de la horda. Los esqueletos son el grueso; el licántropo y el duende son los dos
@@ -56,38 +59,55 @@ const ABILITIES := {
 	"tormentero": [
 		{"n": "Esfera voltaica", "col": Color(0.6, 0.8, 1.0), "sfx": "proj_bolt", "k": "proj", "cd": 0.6, "cast": 0.14, "dmg": 22.0, "rng": 660.0, "spd": 620.0, "homing": true},
 		{"n": "Trampa eléctrica", "col": Color(0.5, 0.75, 1.0), "sfx": "trap", "k": "trap", "cd": 10.0, "cast": 0.3, "dmg": 18.0, "rng": 320.0, "rad": 320.0,
-		 "dur": 10.0, "stun": 1.0, "chg": 3, "act": 5, "tick": 2.0, "tgt": 3},
+		 "dur": 10.0, "stun": 1.0, "chg": 3, "act": 5, "tick": 2.0, "tgt": 3,
+		 "anim": "OverhandThrow", "adur": 0.9},   # la lanza a 5 m: se ve el gesto de tirarla
 		{"n": "Tormenta eléctrica", "col": Color(0.7, 0.8, 1.0), "sfx": "storm", "k": "zone", "cd": 30.0, "cast": 0.5, "dmg": 45.0, "rng": 520.0, "rad": 340.0,
-		 "delay": 0.6, "stun": 3.5, "field": 10.0, "fdmg": 18.0, "fstun": 1.2},
+		 "delay": 0.6, "stun": 3.5, "field": 10.0, "fdmg": 18.0, "fstun": 1.2,
+		 "anim": "Spell_Double_Shoot"},          # conjuro a dos manos para la definitiva
 	],
 	"clerigo": [
-		{"n": "Golpe sagrado", "col": Color(1.0, 0.95, 0.5), "sfx": "proj_arcane", "k": "proj", "cd": 0.6, "cast": 0.12, "dmg": 16.0, "rng": 680.0, "spd": 620.0, "homing": true},
+		# Desviación del 2D (petición del usuario, 2026-09-17, "para que el clérigo coja más fuerza"):
+		# cada golpe que impacta envenena `toxin` s más (hasta Combat.TOXIN_MAX) y la toxina quita
+		# `tdmg` por segundo. 2 s × 8 = 16 de daño extra por golpe, tanto como el impacto: con 4 por
+		# segundo (lo primero que se midió) le triplicaba el daño pero no le daba victorias.
+		{"n": "Golpe sagrado", "col": Color(1.0, 0.95, 0.5), "sfx": "proj_arcane", "k": "proj", "cd": 0.6, "cast": 0.12, "dmg": 16.0, "rng": 680.0, "spd": 620.0, "homing": true,
+		 "toxin": 2.0, "tdmg": 8.0},
 		# Sanación: el .tres trae 260 px; x3 a petición del usuario (4,1 m -> 12,2 m).
-		{"n": "Sanación", "col": Color(0.5, 1.0, 0.5), "sfx": "heal", "k": "heal", "cd": 7.0, "cast": 0.3, "heal": 35.0, "rad": 780.0},
+		{"n": "Sanación", "col": Color(0.5, 1.0, 0.5), "sfx": "heal", "k": "heal", "cd": 7.0, "cast": 0.3, "heal": 35.0, "rad": 780.0,
+		 "anim": "Spell_Double_Shoot"},
 		{"n": "Esporas", "col": Color(0.5, 1.0, 0.4), "sfx": "gas", "k": "spores", "cd": 40.0, "cast": 0.5, "dmg": 10.0, "rng": 520.0, "rad": 190.0,
-		 "field": 10.0, "fdmg": 10.0, "tick": 1.0},
+		 "field": 10.0, "fdmg": 10.0, "tick": 1.0,
+		 "anim": "Consume", "adur": 1.1},        # idea del usuario: se bebe el frasco para soltarlas
 	],
 	"ilusionista": [
-		{"n": "Pistola espectral", "col": Color(0.85, 0.65, 1.0), "sfx": "proj_arcane", "k": "proj", "cd": 0.18, "cast": 0.06, "dmg": 9.0, "rng": 820.0, "spd": 1000.0, "homing": true},
+		{"n": "Pistola espectral", "col": Color(0.85, 0.65, 1.0), "sfx": "proj_arcane", "k": "proj", "cd": 0.18, "cast": 0.06, "dmg": 9.0, "rng": 820.0, "spd": 1000.0, "homing": true,
+		 "anim": "Pistol_Shoot"},                # lleva pistola: hasta ahora disparaba conjurando
 		{"n": "Señuelo", "col": Color(0.75, 0.55, 1.0), "sfx": "decoy", "k": "decoy", "cd": 12.0, "cast": 0.25,
 		 "rng": 260.0, "rad": 70.0, "dur": 20.0, "n_decoys": 1, "move": 2, "swap": true, "act": 1},
 		{"n": "Fiesta de clones", "col": Color(0.9, 0.6, 1.0), "sfx": "decoy", "k": "decoy", "cd": 35.0, "cast": 0.4,
 		 "rng": 0.0, "rad": 110.0, "dur": 20.0, "n_decoys": 5, "move": 1, "invis": 4.0,
+		 "anim": "Spell_Double_Shoot",
 		 "tough": true},   # desviación: vida ×3 por equipos (en el 2D un golpe los deshace)
 	],
 	"caballero": [
-		{"n": "Lanzada", "col": Color(0.85, 0.85, 0.9), "sfx": "melee", "k": "melee", "cd": 0.8, "cast": 0.2, "dmg": 30.0, "rad": 115.0},
+		{"n": "Lanzada", "col": Color(0.85, 0.85, 0.9), "sfx": "melee", "k": "melee", "cd": 0.8, "cast": 0.2, "dmg": 30.0, "rad": 115.0,
+		 "anim": "Sword_Regular_A"},
 		# Corte de hacha (antes "Carga con escudo": el Caballero lleva hacha, no escudo).
 		# Preaviso largo a propósito: se ve tomar impulso antes de salir.
 		{"n": "Corte de hacha", "col": Color(0.8, 0.3, 0.3), "sfx": "dash", "k": "dash", "cd": 7.0,
-		 "cast": 0.12, "dmg": 25.0, "rng": 700.0, "rad": 70.0, "spd": 900.0, "shove": 5.5, "sync": true},
+		 "cast": 0.12, "dmg": 25.0, "rng": 700.0, "rad": 70.0, "spd": 900.0, "shove": 5.5, "sync": true,
+		 "anim": "Sword_Dash"},                  # idea del usuario: el avance rápido con espada (1,57 s,
+		                                          # lo mismo que duraba con Sword_Attack: la carga no cambia)
 		# Muro de espinas: el .tres trae 46 px de radio; x3 a petición del usuario (0,7 m -> 2,2 m).
 		{"n": "Muro de espinas", "col": Color(0.85, 0.35, 0.3), "sfx": "spikes", "k": "spikes", "cd": 25.0, "cast": 0.5, "dmg": 20.0, "rng": 840.0, "rad": 138.0,
-		 "dur": 10.0, "stun": 2.0, "tick": 1.0},
+		 "dur": 10.0, "stun": 2.0, "tick": 1.0,
+		 "anim": "OverhandThrow", "adur": 1.0},
 	],
 	"rompemareas": [
+		# Idea del usuario (2026-09-17): el mandoble normal es Sword_Regular_C y el CARGADO el combo.
 		{"n": "Mandoble de ancla", "col": Color(0.85, 0.72, 0.45), "sfx": "melee", "k": "melee", "cd": 1.1, "cast": 0.3,
-		 "dmg": 60.0, "rad": 170.0, "charge": true, "dust": true, "arc": 180.0},
+		 "dmg": 60.0, "rad": 170.0, "charge": true, "dust": true, "arc": 180.0,
+		 "anim": "Sword_Regular_C", "adur": 1.0, "anim_charged": "Sword_Regular_Combo", "adur_charged": 1.6},
 		# "Enganche", no "Arponazo": lo que lanza es su ANCLA encadenada, no un arpón (nombre
 		# elegido por el usuario). SIN teledirigir (petición suya): se clava donde apuntaste, no
 		# persigue a nadie. A cambio `catch` es ancho —190 px = 3,0 m— para que el que estaba ahí
@@ -95,21 +115,28 @@ const ABILITIES := {
 		# petición suya: recarga 20 s (el .tres dice 7) y alcance 1200 px = 19 m (el .tres dice 520
 		# = 8,3 m). `--cd=N` recorta las recargas para probar sin esperar.
 		{"n": "Enganche", "col": Color(0.8, 0.68, 0.42), "sfx": "harpoon", "k": "proj", "cd": 20.0, "cast": 0.3, "dmg": 34.0, "rng": 1200.0, "spd": 780.0,
-		 "stun": 0.5, "pull": true, "solid": "anchor", "catch": 190.0},
+		 "stun": 0.5, "pull": true, "solid": "anchor", "catch": 190.0,
+		 "anim": "OverhandThrow", "adur": 1.0},  # lanza el ancla por encima del hombro
 		{"n": "Ancla clavada", "col": Color(0.85, 0.7, 0.4), "sfx": "buff", "k": "buff", "cd": 26.0, "cast": 0.5, "dmg": 26.0, "rng": 300.0, "dur": 5.0,
-		 "resist": 0.3, "root": true, "tick": 0.8},
+		 "resist": 0.3, "root": true, "tick": 0.8,
+		 "anim": "Sword_Regular_B"},             # tajo de arriba abajo: clava el ancla en el suelo
 	],
 	"liche": [
 		{"n": "Rayo gélido", "col": Color(0.5, 0.9, 1.0), "sfx": "proj_frost", "k": "proj", "cd": 0.7, "cast": 0.14, "dmg": 26.0, "rng": 700.0, "spd": 650.0, "homing": true},
-		{"n": "Alzar esqueleto", "col": Color(0.85, 0.9, 0.75), "sfx": "summon", "k": "summon", "cd": 6.0, "cast": 0.3, "rad": 70.0, "chg": 3, "count": 1},
-		{"n": "Alzar ejército", "col": Color(0.8, 0.9, 0.7), "sfx": "summon", "k": "summon", "cd": 30.0, "cast": 0.6, "rng": 400.0, "rad": 90.0, "count": 7},
+		{"n": "Alzar esqueleto", "col": Color(0.85, 0.9, 0.75), "sfx": "summon", "k": "summon", "cd": 6.0, "cast": 0.3, "rad": 70.0, "chg": 3, "count": 1,
+		 "anim": "Spell_Double_Shoot"},
+		{"n": "Alzar ejército", "col": Color(0.8, 0.9, 0.7), "sfx": "summon", "k": "summon", "cd": 30.0, "cast": 0.6, "rng": 400.0, "rad": 90.0, "count": 7,
+		 "anim": "Spell_Double_Enter"},          # levanta a los siete con las dos manos
 	],
 	"quimico": [
-		{"n": "Frasco corrosivo", "col": Color(0.75, 0.95, 0.3), "sfx": "proj_flask", "k": "proj", "cd": 0.6, "cast": 0.12, "dmg": 20.0, "rng": 640.0, "spd": 640.0, "homing": true},
+		{"n": "Frasco corrosivo", "col": Color(0.75, 0.95, 0.3), "sfx": "proj_flask", "k": "proj", "cd": 0.6, "cast": 0.12, "dmg": 20.0, "rng": 640.0, "spd": 640.0, "homing": true,
+		 "anim": "OverhandThrow", "adur": 0.55},  # tira el frasco (rápido: uno cada 0,6 s)
 		{"n": "Baliza Nox", "col": Color(0.75, 0.95, 0.3), "sfx": "trap", "k": "beacon", "cd": 10.0, "cast": 0.3,
-		 "dmg": 8.0, "rng": 320.0, "rad": 320.0, "dur": 10.0, "chg": 3, "act": 5, "tick": 0.5, "slow": 0.5},
+		 "dmg": 8.0, "rng": 320.0, "rad": 320.0, "dur": 10.0, "chg": 3, "act": 5, "tick": 0.5, "slow": 0.5,
+		 "anim": "OverhandThrow", "adur": 1.0},
 		{"n": "Granada Nox", "col": Color(0.6, 0.95, 0.25), "sfx": "gas", "k": "gas", "cd": 30.0, "cast": 0.5, "dmg": 10.0, "rng": 560.0, "rad": 460.0,
-		 "field": 20.0, "fdmg": 10.0, "tick": 1.0, "slow": 0.5},
+		 "field": 20.0, "fdmg": 10.0, "tick": 1.0, "slow": 0.5,
+		 "anim": "OverhandThrow", "adur": 1.1},
 	],
 	"guerrero": [
 		{"n": "Tajo", "col": Color(1.0, 0.85, 0.6), "sfx": "melee", "k": "melee", "cd": 0.8, "cast": 0.12, "dmg": 30.0, "rad": 80.0},
@@ -202,15 +229,22 @@ const LEGENDS := [
 ## Cuántas de LEGENDS entran en la rotación. Las de después son las retiradas del juego.
 const PLAYABLE := 7
 
-# Solo se injertan las animaciones que se usan: copiarlas las 43 por personaje cuesta caro
-# cuando hay 40 zombis en pantalla.
+# Solo se injertan las animaciones que se usan: copiarlas las 120 de la Pro por personaje cuesta caro
+# cuando hay 70 criaturas en pantalla.
 # Roll = la voltereta de Retirada del Arquero. Las de UAL2 van en su propia pasada.
-# Swim_Fwd / Swim_Idle hacen de arrastrarse derribado (no hay animación de gatear) y Fixing_Kneeling es
-# el gesto de quien levanta a un compañero (Revive.DOWNED_* y HELPER_ANIM).
-const HERO_ANIMS := "Idle,Jog_Fwd,Sword_Attack,Spell_Simple_Shoot,Death01,Roll,Crouch_Idle,Crouch_Fwd,Swim_Fwd,Swim_Idle,Fixing_Kneeling"
+# Cuatro direcciones para andar, para andar agachado y para arrastrarse derribado (Combat.move_anim
+# elige según hacia dónde mira), Fixing_Kneeling es el gesto de quien levanta a un compañero, las
+# Hit_* son la queja al recibir un golpe (por dónde le han dado) e Idle_Tired es cómo se queda de pie
+# con menos de media vida (peticiones del usuario, 2026-09-17).
+const HERO_ANIMS := "Idle,Jog_Fwd,Jog_Bwd,Jog_Left,Jog_Right,Sword_Attack,Spell_Simple_Shoot,Death01,Roll," \
+	+ "Crouch_Idle,Crouch_Fwd,Crouch_Bwd,Crouch_Left,Crouch_Right," \
+	+ "Crawl_Idle,Crawl_Fwd,Crawl_Bwd,Crawl_Left,Crawl_Right,Fixing_Kneeling," \
+	+ "Hit_Chest,Hit_Head,Hit_Shoulder_L,Hit_Shoulder_R,Idle_Tired," \
+	+ "Pistol_Shoot,Spell_Double_Shoot,Spell_Double_Enter"
 # Sword_Regular_A (0,43 s) y _B (0,53 s) miden casi lo que dura un preaviso, así que salen a
 # velocidad casi natural. Sword_Heavy_Combo dura 4,33 s: estirado al preaviso salía a 12x, un
 # temblor en vez de un mazazo.
-const HERO_ANIMS_2 := "OverhandThrow,Sword_Regular_A,Sword_Regular_B,Shield_Dash"
+const HERO_ANIMS_2 := "OverhandThrow,Sword_Regular_A,Sword_Regular_B,Sword_Regular_C,Sword_Regular_Combo," \
+	+ "Sword_Dash,Shield_Dash,Consume,Idle_Rail_Call"
 const ZOMBIE_ANIMS_1 := "Death01,Sword_Attack"
 const ZOMBIE_ANIMS_2 := "Zombie_Idle,Zombie_Walk_Fwd,Zombie_Scratch"

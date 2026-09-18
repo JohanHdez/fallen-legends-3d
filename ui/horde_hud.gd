@@ -1,6 +1,6 @@
 ## HUD de la Horda en equipo: vida de cada compañero arriba a la derecha, bajo el minimapa (o su cuenta atrás si ha
 ## caído), el aviso del centro cuando caes o levantas a alguien, y la pantalla final cuando cae todo el
-## equipo, con la oleada alcanzada, bajas y caídas, Revancha y Menú. Construido en código, con botones
+## equipo (o al superar las 10 oleadas), con la oleada alcanzada, bajas y caídas, Revancha y Menú. Construido en código, con botones
 ## de 64 px o más.
 class_name HordeHud
 extends Control
@@ -137,13 +137,17 @@ func show_end() -> void:
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 10)
 	_end.add_child(col)
-	var title := _label(50, Color(1, 0.45, 0.4))
-	title.text = "HAS MUERTO" if hm.size == 1 else "LA HORDA OS HA SUPERADO"
+	var title := _label(50, Color(1.0, 0.82, 0.38) if hm.won else Color(1, 0.45, 0.4))
+	if hm.won:
+		title.text = "¡HORDA SUPERADA!"
+	else:
+		title.text = "HAS MUERTO" if hm.size == 1 else "LA HORDA OS HA SUPERADO"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(title)
 	var t := int(hm.time)
 	var why := _label(22, Color(0.9, 0.9, 0.95))
-	why.text = "Oleada %d · %d:%02d" % [hm.main.horde.wave, t / 60, t % 60]
+	why.text = ("Las %d oleadas · %d:%02d" % [Horde.WAVES, t / 60, t % 60]) if hm.won \
+		else ("Oleada %d de %d · %d:%02d" % [hm.main.horde.wave, Horde.WAVES, t / 60, t % 60])
 	why.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(why)
 	var grid := GridContainer.new()

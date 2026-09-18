@@ -11,8 +11,9 @@ independientes**: comparten mundo, leyendas y balance, pero ninguno depende del 
 El 2D **no se publicará en Android**; el 3D sí, con `com.fallenlegends.proto3d` (decidido, no se
 cambia). Sin red por ahora.
 
-Modos (menú de inicio o `--mode=`): **Horda** (oleadas de cinco especies, solo o con 1-3 compañeros
-bot, con jefe-leyenda y criaturas que buscan; se pierde si cae todo el equipo) y **1v1, 2v2, 3v3, 4v4**
+Modos (menú de inicio o `--mode=`): **Horda** (10 oleadas de cinco especies, solo o con 1-3 compañeros
+bot, con Rompemareas de jefe desde la oleada 5 —1, 2, 3 y 4— y criaturas que buscan; se pierde si cae
+todo el equipo y se gana superando la oleada 10) y **1v1, 2v2, 3v3, 4v4**
 contra bots **al mejor de 3 rondas por eliminación**; en los dos, un compañero agachado a tu lado te
 levanta o vuelves solo a los 15/30/60 s. Por equipos, con vida
 ×3, definitiva por carga, básicas que pueden fallar, munición en la básica (menos la Ilusionista) y
@@ -70,7 +71,7 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
 | Fichero | Clase | Qué es |
 |---|---|---|
 | `main.gd` | `Main` | Escena raíz (`main.tscn`): elige modo, construye el mapa 3D, cámara, control del jugador (teclado/ratón/táctil, botón de agacharse), gas (en la Horda se para al 60 %), día/noche, barras, insignias y HUD de depuración. ~2.500 líneas |
-| `game/horde.gd` | `Horde` | La Horda: oleadas (escalan con el equipo), especies, jefe-leyenda (un `Fighter` Rompemareas del equipo 0 con `BotBrain`, sin regeneración), un campo de flujo por leyenda viva, IA de criaturas con estados (`wander` → `chase` → `search`) según `CreatureSenses`, gritos y sus bajas con autor. `main.zombies` es un alias de `horde.zombies` (vacío fuera de la Horda) |
+| `game/horde.gd` | `Horde` | La Horda: 10 oleadas (escalan con el equipo: +6 criaturas y +10 vivas por compañero), especies, jefe-leyenda (un `Fighter` Rompemareas del equipo 0 con `BotBrain`, sin regeneración), un campo de flujo por leyenda viva, IA de criaturas con estados (`wander` → `chase` → `search`) según `CreatureSenses`, gritos y sus bajas con autor. `main.zombies` es un alias de `horde.zombies` (vacío fuera de la Horda) |
 | `game/minions.gd` | `Minions` | Esqueletos del Rey liche: órdenes Atacar / Reagrupar / Emboscada (`Fighter.minion_order`, `ambush_at`), formación, enterrarse (`"hidden"` en su ficha: `foes_in` los salta) y su IA por la rejilla. Lo llama `Combat.tick_allies` |
 | `game/creature_senses.gd` | `CreatureSenses` | Pura: vista (12/8 m, línea de visión), escondido (1,5 m; 4 m si ya te persigue), grito a 30 m, tiempos de perder el rastro y rebuscar |
 | `game/horde_mode.gd` | `HordeMode` | La Horda en equipo (`--team`, selector del menú): compañeros bot, reanimaciones, derrota al caer todo el equipo, Revancha/Menú |
@@ -124,16 +125,24 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
   `PX` al usarlas): `k` = `proj`, `melee`, `dash`, `heal`, `buff`, `zone`, `gas`, `spores`, `trap`,
   `beacon`, `spikes`, `summon`, `decoy`, más modificadores (`homing`, `pull`, `catch`, `solid`,
   `stun`, `knock`, `shove`, `charge`, `dust`, `arc`, `back`, `sync`, `anim`, `adur`, `field`, `chg`,
-  `swap`, `invis`). Mecánica nueva = `k` nuevo con su `cast_*` y su `tick_*` en Combat, y su caso en
-  `BotBrain._use_abilities`.
+  `swap`, `invis`, `anim_charged`/`adur_charged` para el mandoble cargado). Mecánica nueva = `k`
+  nuevo con su `cast_*` y su `tick_*` en Combat, y su caso en `BotBrain._use_abilities`. Cada
+  habilidad pide su animación con `"anim"`; `tests/test_anim_map.gd` vigila que exista, esté
+  injertada y no salga a cámara rápida.
 - **Criaturas**: `SPECIES`; se mueven con un campo de flujo BFS compartido cada 0,4 s. **Bots**:
   cada uno su camino con `NavGrid`.
+- **Terreno**: sobre la pradera, `main._build_grass_fields` reparte manchas ANTES de construir el
+  suelo: eriales (`zones` = 3: tierra y piedras), hierba alta (`tall_grass`, la única que esconde) y
+  hierba media (`mid_grass`, solo paisaje). `MapLayout.grass_tier` decide la altura de cada celda.
 - **Mapa**: `MapBuilder` guarda `grid[y][x]`; `main.gd` lo **transpone una vez** (`MapLayout.transpose`)
   y lee `grid[x][y]`; las llamadas a MapBuilder usan `_mb_grid`/`_mb_zones`. Colisión de rejilla (caja
   de 3 m por celda bloqueada); los **peñascos** ocupan una celda (pasa a `MOUNTAIN`) y chocan con su
   envolvente convexa; las rocas de muro se encajan en su celda. `tests/rocks_probe.gd` vigila que
   nadie se meta en la piedra.
-- **Modelos**: glTF **importados** (el importador quita `_Loop` de los nombres de animación). Cuerpo
+- **Modelos**: glTF **importados** (el importador quita `_Loop` de los nombres de animación). Las
+  animaciones salen de `UAL1_Pro.glb` (120, CC0) y `UAL2_Standard.glb`; `Combat.move_anim` elige la
+  dirección (frente, espalda, lados), `Combat.face_dir` decide hacia dónde mira cada leyenda (la
+  tuya a la cámara, un bot a su objetivo) y `Combat.hit_anim` la queja al recibir un golpe. Cuerpo
   base cortado por el cuello + piezas de atuendo que se **sustituyen**, no se apilan. Solo se
   injertan las animaciones de `HERO_ANIMS*`/`ZOMBIE_ANIMS_*`. Armas construidas en código.
 
@@ -212,6 +221,15 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
   pelea a 5,6 m pudiendo disparar a 12,8. **Aturdir en el 3D solo impide moverse**; en el 2D
   tampoco deja atacar (`player.gd`: "no se mueve ni ataca"). Nadie muere en el gas. Los bots
   apenas esquivan.
+- **Clérigo flojo por el cerebro, no por el daño** (2026-09-17): con la toxina su daño con la básica
+  sube +45 % y sus victorias siguen en el 40 % (16 partidas por versión, `--seed`). `DESIRED_RANGE`
+  le hace pelear a 4,7 m cuando su Golpe sagrado llega a 10,6: ese es el arreglo pendiente, y solo
+  afecta a los bots (no a cuando lo juega una persona).
+- **De la oleada 6 en adelante no hay quien pase con bots** (2026-09-17): un equipo de 4 bots cae en
+  la oleada 5 (~5,5 min) y, empezando en la 6, 7 u 8, aguanta 22-47 s. Probado a repartir la vida y
+  el daño de los jefes entre los que salen: cambia poco, mueren por el daño combinado de jefes y
+  enjambre. El arreglo de verdad es que los compañeros bot jueguen mejor (distancia, centrarse en el
+  jefe, no quedarse en medio del enjambre).
 - **Dificultad de la Horda sin probar con personas** (2026-09-17): con bots, solo se cae en las
   oleadas 3-5 y un equipo de 4 cae en la 5 (el jefe) dos de cada tres veces. Perillas en `Horde`:
   `CREATURE_DMG`, `HP_PER_WAVE`, `STAGE_*`, `BOSS_LEGEND_HP/DMG`. Las trazas deterministas de las

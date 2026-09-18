@@ -19,6 +19,21 @@ const BOSS_SCALE := 1.3
 # zonas podríamos hacerlos un poco más difíciles"). Daño de base por encima del 2D, +10 % de vida por
 # oleada (horde.HP_PER_WAVE del 2D) y, por cada tramo que cierra el gas, más vida, daño y velocidad
 # para lo que salga desde entonces (vida) y para todas a la vez (daño y velocidad).
+# Con equipo salen bastantes más criaturas y más de un jefe (petición del usuario, 2026-09-17:
+# "deja que salgan más Rompemareas... y más cantidad dependiendo si hay más personas"). Antes eran
+# 3 criaturas más por compañero y 8 vivas más; ahora el doble largo, y los jefes se multiplican.
+const PER_PLAYER_SPAWN := 6            # criaturas más en cada oleada por cada compañero
+const PER_PLAYER_ALIVE := 10           # y vivas a la vez
+# Esquema de jefes y final que fijó el usuario (2026-09-17): la Horda son 10 oleadas, los Rompemareas
+# empiezan en la 5 y van subiendo (1, 2, 3, 4) hasta quedarse en cuatro a partir de la 8. Superar la
+# oleada 10 es GANAR: antes las oleadas no acababan nunca.
+const WAVES := 10
+const BOSS_FIRST := 5                  # primera oleada con jefe
+const BOSS_MAX := 4                    # tope de jefes a la vez
+# Con 70 criaturas vivas, mover el esqueleto de todas es lo que más cuesta en el móvil: las que están
+# a más de esto de la cámara se quedan quietas de animación (se siguen moviendo por el mapa) y vuelven
+# a animarse al acercarse. Petición del usuario (2026-09-17): "los FPS mínimo 30, ideal 60".
+const ANIM_FAR := 30.0
 const CREATURE_DMG := 1.3
 const HP_PER_WAVE := 0.1
 const GAS_STAGES := 4
@@ -103,6 +118,34 @@ static func gas_stage(r0: float, r: float, stop: float, closing: bool) -> int:
 
 
 ## Vida de lo que sale en la oleada `w` con el gas en el tramo `s`.
+## Criaturas de la oleada `w` con `party` leyendas en el equipo.
+static func wave_size(w: int, party: int) -> int:
+	return 6 + w * 4 + PER_PLAYER_SPAWN * (party - 1)      # horde._wave_plan del 2D, con más por compañero
+
+
+## Cuántas criaturas pueden estar vivas a la vez.
+static func alive_cap(party: int) -> int:
+	return Main.MAX_ALIVE + PER_PLAYER_ALIVE * (party - 1)
+
+
+## Vida de CADA jefe cuando salen `count` a la vez: se reparte por la raíz del número, así que cuatro
+## jefes no son cuatro veces la vida (serían 9.000 y no hay quien los tumbe) sino el doble en total,
+## repartido en cuatro cuerpos que pegan cada uno por su cuenta.
+static func boss_hp_mult(party: int, count: int) -> float:
+	return BOSS_LEGEND_HP * (1.0 + BOSS_HP_PER_PLAYER * float(party - 1)) / sqrt(float(maxi(count, 1)))
+
+
+## Rompemareas de la oleada `w`: ninguno antes de BOSS_FIRST; después uno más por oleada hasta BOSS_MAX.
+static func boss_count(w: int) -> int:
+	return clampi(w - BOSS_FIRST + 1, 0, BOSS_MAX)
+
+
+## ¿Se acabó la Horda con victoria? Última oleada, sin criaturas vivas, sin jefes en pie y sin nada
+## por salir.
+static func run_over(w: int, alive: int, boss_alive: bool, left: int) -> bool:
+	return w >= WAVES and alive <= 0 and not boss_alive and left <= 0
+
+
 static func hp_mult(w: int, s: int) -> float:
 	return (1.0 + HP_PER_WAVE * float(maxi(w - 1, 0))) * (1.0 + STAGE_HP * float(s))
 
@@ -139,13 +182,15 @@ func _start_wave() -> void:
 	wave += 1
 	if main.horde_mode != null:
 		main.horde_mode.on_wave_start()   # las muertas del equipo vuelven
-	left_to_spawn = 6 + wave * 4 + 3 * (party_size() - 1)      # horde._wave_plan del 2D
+	left_to_spawn = wave_size(wave, party_size())
 	_break_t = 0.0
-	if wave % Main.BOSS_WAVE == 0:
-		spawn_boss()
-		print("oleada %d: %d esqueletos + JEFE Rompemareas" % [wave, left_to_spawn])
+	var n := boss_count(wave)
+	for i in n:
+		spawn_boss(n)
+	if n > 0:
+		print("oleada %d de %d: %d criaturas + %d JEFE(S) Rompemareas" % [wave, WAVES, left_to_spawn, n])
 	else:
-		print("oleada %d: %d criaturas" % [wave, left_to_spawn])
+		print("oleada %d de %d: %d criaturas" % [wave, WAVES, left_to_spawn])
 
 
 ## El jefe de la oleada: una leyenda Rompemareas llevada por un bot del bando de la horda, como el
@@ -153,13 +198,13 @@ func _start_wave() -> void:
 ## arrastra y Ancla clavada. Antes era un zombi grande con su modelo que solo pegaba de cerca, y el
 ## usuario lo notó: "nunca usó sus poderes contra mí" (2026-09-17). Vida ×BOSS_LEGEND_HP de la de la
 ## leyenda, más un 20 % por compañero (horde.BOSS_HP_PER_PLAYER del 2D), y todo su daño ×1,5.
-func spawn_boss() -> void:
+func spawn_boss(count := 1) -> void:
 	if spawn_cells.is_empty():
 		return
 	var c: Vector2i = spawn_cells[rng.randi() % spawn_cells.size()]
 	var f := combat.spawn_fighter(_legend_index(BOSS_LEGEND), Fighter.TEAM_HORDE, false,
 		main._cell_pos(c.x, c.y) + Vector3(0, 0.3, 0))
-	f.hp_mult = BOSS_LEGEND_HP * (1.0 + BOSS_HP_PER_PLAYER * (party_size() - 1))
+	f.hp_mult = boss_hp_mult(party_size(), count)
 	f.rec["hpmax"] = f.hp_max()
 	f.rec["hp"] = f.hp_max()
 	f.dmg_mult = BOSS_LEGEND_DMG
@@ -215,6 +260,20 @@ func _rebuild_flows() -> void:
 			_flows.erase(f.id)
 
 
+## Animación solo para las criaturas de cerca (ANIM_FAR). Solo toca el AnimationPlayer cuando cambia
+## de lado, así que no cuesta nada por fotograma.
+func _anim_lod(z: Dictionary, pos: Vector3) -> void:
+	var anims: Array = z["anims"]
+	if anims.is_empty():
+		return
+	var near: bool = pos.distance_squared_to(main.pivot.global_position) <= ANIM_FAR * ANIM_FAR
+	if bool(z.get("anim_on", true)) == near:
+		return
+	z["anim_on"] = near
+	for ap in anims:
+		(ap as AnimationPlayer).active = near
+
+
 ## Campo de flujo por BFS desde `goals`: cada celda guarda la siguiente hacia la meta más cercana. Es
 ## lo que permite que 40 criaturas recorran los pasillos sin una malla de navegación ni una ruta por
 ## bicho.
@@ -255,7 +314,7 @@ func _bfs(goals: Array) -> Array:
 ## Sale por los bordes del mapa o de una tumba, como en la Horda del juego.
 func spawn_zombie(at := Vector3.INF) -> void:
 	var placed := at != Vector3.INF     # sitio fijo: lo usan las dianas de prueba
-	if zombies.size() >= Main.MAX_ALIVE + 8 * (party_size() - 1) or (not placed and spawn_cells.is_empty()):
+	if zombies.size() >= alive_cap(party_size()) or (not placed and spawn_cells.is_empty()):
 		return
 	var from_grave := not placed and not _grave_cells.is_empty() and rng.randf() < 0.3
 	var c := Vector2i.ZERO
@@ -299,7 +358,7 @@ func spawn_zombie(at := Vector3.INF) -> void:
 		"spd": float(sp["spd"]), "dmg": float(sp["dmg"]), "reach": float(sp["reach"]),
 		"bscale": float(sp["bscale"]), "cap": float(sp["cap"]),
 		# Sentidos (etapa 4 de la Horda en equipo): nace deambulando, sin saber dónde está nadie.
-		"state": "wander", "know": -1, "last": Vector3.ZERO, "seen_t": 99.0, "search_t": 0.0,
+		"state": "wander", "know": -1, "last": Vector3.ZERO, "seen_t": 99.0, "search_t": 0.0, "wander_t": 0.0,
 		"sense_t": CreatureSenses.CHECK_EVERY * float(_sense_seq % 5) / 5.0, "goal": Vector3.INF,
 		"path": [], "path_goal": Vector2i(-999, -999), "wait_t": 0.0, "alert_t": 0.0, "stuck_t": 0.0})
 	_sense_seq += 1
@@ -356,6 +415,10 @@ func tick(delta: float) -> void:
 				print("   spawn: %.1f ms" % ms)
 			left_to_spawn -= 1
 	elif zombies.is_empty() and not boss_alive:     # la oleada del jefe no acaba hasta tumbarlo
+		if run_over(wave, zombies.size(), boss_alive, left_to_spawn):
+			if main.horde_mode != null:
+				main.horde_mode.on_victory()
+			return
 		_break_t += delta
 		if _break_t >= Main.WAVE_BREAK:
 			_start_wave()
@@ -374,6 +437,7 @@ func tick(delta: float) -> void:
 
 func _tick_zombie(z: Dictionary, body: CharacterBody3D, delta: float) -> void:
 	var pos := body.global_position
+	_anim_lod(z, pos)
 	z["swing_t"] = maxf(0.0, z["swing_t"] - delta)
 	_tick_alert(z, delta)
 	# El empujón/tirón se resuelve ANTES que el aturdimiento. Si se mira después, cualquier
@@ -572,12 +636,26 @@ func _tick_state(z: Dictionary, pos: Vector3, delta: float) -> void:
 			z["search_t"] = float(z["search_t"]) - delta
 			if float(z["search_t"]) <= 0.0:
 				z["state"] = "wander"
+				z["wander_t"] = 0.0
 				z["goal"] = Vector3.INF
 				z["path"] = []
 			elif z["goal"] == Vector3.INF or _flat_dist(pos, z["goal"]) < 1.2:
 				z["goal"] = _goal_near(z["last"], 3)
 				z["path"] = []
 		"wander":
+			# La horda aprieta: tras un rato sin ver a nadie, va derecha a la leyenda más cercana.
+			z["wander_t"] = float(z.get("wander_t", 0.0)) + delta
+			if CreatureSenses.hunts(float(z["wander_t"])):
+				var target := _nearest_legend(pos)
+				if target != null:
+					z["state"] = "chase"
+					z["know"] = target.id
+					z["last"] = target.pos()
+					z["seen_t"] = CreatureSenses.LOSE_AFTER * 0.5   # va a por él, pero sin "verlo"
+					z["wander_t"] = 0.0
+					z["goal"] = Vector3.INF
+					z["path"] = []
+					return
 			if z["goal"] == Vector3.INF:
 				z["goal"] = _wander_goal(pos)
 				z["path"] = []
@@ -592,6 +670,20 @@ func _tick_state(z: Dictionary, pos: Vector3, delta: float) -> void:
 
 ## A quién puede morder: la leyenda que persigue mientras la ve, o el esbirro o señuelo más cercano a
 ## menos de 14 m (los señuelos están para engañar). Vacío si no hay nadie.
+## La leyenda viva (o derribada) más cercana a un punto, para que la horda sepa hacia dónde ir.
+func _nearest_legend(pos: Vector3) -> Fighter:
+	var best: Fighter = null
+	var best_d := INF
+	for f: Fighter in combat.fighters:
+		if f.team == Fighter.TEAM_HORDE or f.dead():
+			continue
+		var d := pos.distance_to(f.pos())
+		if d < best_d:
+			best_d = d
+			best = f
+	return best
+
+
 func _prey_for(z: Dictionary, pos: Vector3) -> Dictionary:
 	var best_d := 1e9
 	var prey: Dictionary = {}
