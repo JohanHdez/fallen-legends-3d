@@ -17,9 +17,13 @@ var _desc: Label
 var _name: Label
 var _stats: Label
 var _skills: Label
+var _name_edit: LineEdit
+var _online_status: Label
+var _net: NetService
 
 
 func _ready() -> void:
+	_net = NetService.node()
 	# set_anchors_AND_OFFSETS_preset, no set_anchors_preset: ya en el árbol, la segunda conserva el
 	# tamaño que tenía el nodo (0×0) y todo lo "centrado" acababa en la esquina superior izquierda.
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -119,12 +123,29 @@ func _ready() -> void:
 	next.pressed.connect(_step_legend.bind(1))
 	pick.add_child(next)
 
-	var play := _button("JUGAR", Vector2(340, 88), 42, Color(0.55, 0.36, 0.08))
+	var play := _button("JUGAR", Vector2(300, 88), 42, Color(0.55, 0.36, 0.08))
 	play.pressed.connect(_play)
 	var play_row := HBoxContainer.new()
 	play_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	play_row.add_theme_constant_override("separation", 12)
 	play_row.add_child(play)
+	# En línea (2026-09-18, fase 1 del juego en línea): tu nombre y a la sala del servidor.
+	_name_edit = LineEdit.new()
+	_name_edit.text = _net.player_name
+	_name_edit.max_length = Identity.NAME_MAX
+	_name_edit.placeholder_text = "Tu nombre"
+	_name_edit.custom_minimum_size = Vector2(220, 88)
+	_name_edit.add_theme_font_size_override("font_size", 26)
+	play_row.add_child(_name_edit)
+	var online := _button("EN LÍNEA", Vector2(220, 88), 32, Color(0.12, 0.32, 0.5))
+	online.pressed.connect(play_online)
+	play_row.add_child(online)
 	col.add_child(play_row)
+	_online_status = _label(18, Color(1.0, 0.75, 0.6))
+	_online_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_online_status.text = _net.last_error
+	_online_status.visible = _net.last_error != ""
+	col.add_child(_online_status)
 
 	var hint := _label(15, Color(0.7, 0.72, 0.8))
 	hint.text = "Teclado: WASD · clic / Q básica · E táctica · R definitiva · Ctrl agacharse · C cámara"
@@ -135,29 +156,11 @@ func _ready() -> void:
 
 
 func _label(sz: int, c: Color) -> Label:
-	var l := Label.new()
-	l.add_theme_font_size_override("font_size", sz)
-	l.add_theme_color_override("font_color", c)
-	l.add_theme_color_override("font_outline_color", Color.BLACK)
-	l.add_theme_constant_override("outline_size", 5)
-	return l
+	return UiKit.label(sz, c)
 
 
 func _button(text: String, min_size: Vector2, sz: int, base := Color(0.16, 0.18, 0.26)) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.custom_minimum_size = min_size
-	b.add_theme_font_size_override("font_size", sz)
-	for st in [["normal", base], ["hover", base.lightened(0.18)], ["pressed", GOLD.darkened(0.45)],
-			["focus", base.lightened(0.1)]]:
-		var s := StyleBoxFlat.new()
-		s.bg_color = st[1]
-		s.set_corner_radius_all(12)
-		s.border_color = GOLD if st[0] == "pressed" else Color(1, 1, 1, 0.08)
-		s.set_border_width_all(2)
-		b.add_theme_stylebox_override(st[0], s)
-	b.add_theme_color_override("font_pressed_color", Color.WHITE)
-	return b
+	return UiKit.button(text, min_size, sz, base)
 
 
 func _set_mode(id: String) -> void:
@@ -206,3 +209,27 @@ func _play() -> void:
 	Engine.set_meta("fl_legend", legend)
 	Engine.set_meta("fl_horde_team", team)
 	get_tree().reload_current_scene()
+
+
+## "EN LÍNEA": guarda el nombre, conecta con el servidor y, cuando te mete en la sala, cambia el menú
+## por la sala (Lobby) en esta misma capa.
+func play_online() -> void:
+	_net.remember_name(_name_edit.text)
+	_name_edit.text = _net.player_name
+	if not _net.lobby_ready.is_connected(_on_lobby_ready):
+		_net.lobby_ready.connect(_on_lobby_ready)
+		_net.left.connect(_on_left)
+	_online_status.visible = true
+	_online_status.text = "Conectando con el servidor…"
+	if _net.join(_net.server_address()) != OK:
+		_online_status.text = "No se pudo conectar."
+
+
+func _on_lobby_ready() -> void:
+	get_parent().add_child(Lobby.new())
+	queue_free()
+
+
+func _on_left(reason: String) -> void:
+	_online_status.visible = true
+	_online_status.text = reason if reason != "" else "Fuera de la sala."

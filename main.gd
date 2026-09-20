@@ -296,6 +296,14 @@ var _aim_idx := -1
 
 func _ready() -> void:
 	_collect_args()
+	# Servidor dedicado del juego en línea (fase 1): no monta mapa, cámara ni HUD; la sala la lleva
+	# el autoload Net. En la fase 2 montará aquí la partida en línea.
+	if _args.has("server"):
+		set_process(false)
+		set_physics_process(false)
+		set_process_input(false)
+		set_process_unhandled_input(false)
+		return
 	# `is_touchscreen_available()` devuelve true en cualquier escritorio porque project.godot activa
 	# `emulate_touch_from_mouse` (para probar el táctil con el ratón): el Mac arrancaba SIEMPRE en
 	# modo móvil, con joystick en pantalla, sin capturar el ratón, sin sombras y en la oleada 2. La

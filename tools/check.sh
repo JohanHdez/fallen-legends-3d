@@ -7,6 +7,7 @@
 #   tools/check.sh tests           # solo pruebas de lógica pura (tests/test_*.gd)
 #   tools/check.sh smoke           # solo humo headless (40 fotogramas, sin ventana)
 #   tools/check.sh probes          # solo sondas de partida (tests/*_probe.gd con --fixed-fps 60)
+#   tools/check.sh net             # solo la sala en línea (servidor y clientes, tools/net_check.sh)
 # Código de salida 1 si algo falla. El ruido del renderizador dummy al salir ("leaked at exit",
 # "Pages in use", "resources still in use", "Leaked instance dependency") y el ERROR conocido de `--shot` en headless
 # (`Parameter "t" is null`, README § Trampa del --shot) NO cuentan como fallo.
@@ -129,13 +130,19 @@ do_probes() {
   done
 }
 
+do_net() {
+  echo "== Red: la sala en línea (servidor y clientes sin pantalla, tools/net_check.sh)"
+  tools/net_check.sh || fail=1
+}
+
 case "${1:-all}" in
   parse) shift; do_parse "$@" ;;
   tests) do_tests ;;
   smoke) do_smoke ;;
   probes) do_probes ;;
-  all)   do_parse; do_tests; do_smoke; do_probes ;;
-  *) echo "Uso: $0 [all|parse [script...]|tests|smoke|probes]" >&2; exit 2 ;;
+  net) do_net ;;
+  all)   do_parse; do_tests; do_smoke; do_probes; do_net ;;
+  *) echo "Uso: $0 [all|parse [script...]|tests|smoke|probes|net]" >&2; exit 2 ;;
 esac
 if [ $fail -ne 0 ]; then echo "RESULTADO: FALLO"; exit 1; fi
 echo "RESULTADO: OK"

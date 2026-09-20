@@ -9,7 +9,8 @@ ARPG de **tercera persona 3D** en **Godot 4.7.2 / GDScript**, hermano de *Fallen
 isométrico, repo `arena-arpg`, en `~/Downloads/arena-arpg` o `$ARENA2D`). **Son dos juegos
 independientes**: comparten mundo, leyendas y balance, pero ninguno depende del otro para compilar.
 El 2D **no se publicará en Android**; el 3D sí, con `com.fallenlegends.proto3d` (decidido, no se
-cambia). Sin red por ahora.
+cambia). Juego en línea en construcción (fase 1 hecha: la sala; ver
+docs/superpowers/specs/2026-09-18-juego-en-linea-design.md).
 
 Modos (menú de inicio o `--mode=`): **Horda** (10 oleadas de cinco especies, solo o con 1-3 compañeros
 bot, con Rompemareas de jefe desde la oleada 5 —1, 2, 3 y 4— y criaturas que buscan; se pierde si cae
@@ -31,9 +32,11 @@ Diseño y decisiones de los modos: `docs/superpowers/specs/2026-09-16-modos-por-
 ```
 godot --path .                                   # jugar: sale el menú (Esc suelta el ratón, P pausa, F10 sale)
 godot --headless --path . --import               # primera vez, y tras crear una class_name nueva (refresca la caché de clases)
-tools/check.sh                                   # PUERTA DE CALIDAD (~1 min): parseo + pruebas puras + humo + sondas
+tools/check.sh                                   # PUERTA DE CALIDAD (~9 min): parseo + pruebas puras + humo + sondas + red
 tools/check.sh parse main.gd                     # solo parseo de un script
-tools/check.sh tests | smoke | probes            # solo pruebas puras | humo headless | sondas de partida
+tools/check.sh tests | smoke | probes | net      # pruebas puras | humo | sondas de partida | sala en línea
+tools/net_check.sh                               # sala en línea: servidor y clientes sin pantalla (también en tools/check.sh)
+godot --headless --path . -- --server --transport=ws   # servidor dedicado del juego en línea
 godot --headless --path . -s tests/test_team_match.gd                        # una prueba pura suelta (salida 1 si falla)
 godot --headless --fixed-fps 60 --path . -- --probe=rocks_probe --secs=60     # ¿alguien se mete en las piedras?
 godot --headless --fixed-fps 60 --path . -- --mode=4v4 --autoplay --log --probe=match_probe   # partida de bots entera
@@ -53,7 +56,8 @@ Flags de prueba (todos en README § "Opciones útiles para probar"): `--mode`, `
 `--autoplay`, `--team`, `--down-one`, `--expect-defeat`, `--rounds`, `--roundtime`, `--autocast`, `--probe`, `--near`, `--zombies`, `--wave`,
 `--boss`, `--foe`, `--dianas`, `--cd`, `--nozone`, `--zonewait`, `--zonefast`, `--cycle`, `--night`,
 `--nodecor`, `--noshadow`, `--touch`, `--roster`, `--fxtest`, `--bench`, `--log`, `--animlog`,
-`--sporelog`, `--dashlog`, `--meleelog`, `--rocklog`, `--dbg`.
+`--sporelog`, `--dashlog`, `--meleelog`, `--rocklog`, `--dbg`, `--server`, `--transport`, `--port`,
+`--client`, `--name`, `--identity`, `--protocol`, `--netprobe`.
 
 **Determinismo**: `rng` con semilla fija (`MAP_SEED` 1234) y `--fixed-fps 60` hacen que dos
 ejecuciones iguales den la MISMA traza. Ojo: **jugando de verdad la semilla la pone el menú**
@@ -96,6 +100,11 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
 | `ui/match_hud.gd` | `MatchHud` | Rondas, leyendas en pie, reloj, bajas recientes, carteles de ronda, pantalla final |
 | `ui/ammo_bar.gd` | `AmmoBar` | Tu munición: segmentos bajo tu vida que miran a la cámara, parpadeo y sonido al disparar sin munición |
 | `ui/pause_menu.gd` | `PauseMenu` | ☰ / P: Seguir, Reiniciar, Menú (árbol en pausa, `PROCESS_MODE_ALWAYS`) |
+| `net/net.gd` | `NetService` (autoload `Net`) | Conexión (WebSocket/ENet), registro con `PROTOCOL`, sala (autoridad en el servidor) y arranque; `--server`, `--client`, `--netprobe` |
+| `net/lobby_rules.gd` | `LobbyRules` | Pura: líder, equipos, leyendas sin repetir dentro de un equipo, listos, reparto de plazas con bots |
+| `ui/lobby.gd` | `Lobby` | La sala: equipos en columnas, tu leyenda y equipo, modo (solo el líder), ¡Listo! e Iniciar |
+| `ui/ui_kit.gd` | `UiKit` | Etiqueta, botón y marca del botón puesto, compartidos por el menú y la sala |
+| `net/net_address.gd`, `net/identity.gd` | `NetAddress`, `Identity` | Copiados del 2D: dirección→transporte; id de dispositivo y apodo |
 | `touch_ui.gd` | — | Solo dibuja joystick y botones; lee de `main` (`_abil`, `_chg`, `cooldown_*`, `swap_ready`…) |
 | `map_builder.gd`, `dungeon_gen.gd` | `MapBuilder`, `DungeonGen` | **Copias literales del 2D** (no se editan aquí: hook) |
 
@@ -160,7 +169,8 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
    primero sin cambiar comportamiento (trazas idénticas) y modifícalo después.
 3. **Seguridad y licencias**: repo **privado** (Bestiary de Quaternius va con la QAL); sonidos de
    p0ss **CC-BY-SA 3.0** (atribución visible); ningún secreto en el repo (keystore de release fuera,
-   variables `GODOT_ANDROID_KEYSTORE_RELEASE_*`); Android sin permisos de red; recursos con `load()`,
+   variables `GODOT_ANDROID_KEYSTORE_RELEASE_*`); Android sin permisos de red
+   (hasta la fase 4 del juego en línea, por decisión del usuario del 2026-09-18); recursos con `load()`,
    nunca `Image.load_from_file`; `git push --force` denegado. Detalle: `docs/DESPLIEGUE.md`.
 4. **Sincronía con el 2D**: `map_builder.gd` y `dungeon_gen.gd` no se editan aquí; se traen con
    `tools/sync_2d.sh --copy`. Toda cifra de balance sale de `data/*.tres` del 2D; una desviación
@@ -191,9 +201,13 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
   usarla desde otro script (el hook y `tools/check.sh` ya lo hacen).
 - Flags de prueba: `--clave=valor` tras `--`, documentadas en el README. Trazas de consola con
   prefijo entre corchetes (`[HORDA]`, `[PARTIDA]`, `[RONDA]`, `[BAJA]`, `[FIN]`, `[SONDA]`, `[ROCAS]`,
-  `[PLANO]` el plano de una semilla).
+  `[RED]` la sala en línea, `[PLANO]` el plano de una semilla).
 - `.uid` junto a cada script **se versiona**; `.import` no.
 - Specs y planes en `docs/superpowers/specs/` y `docs/superpowers/plans/` (`AAAA-MM-DD-<tema>-design.md`).
+- **El autoload `Net` no se usa por su nombre desde un script**: `Net.x` no compila con
+  `--check-only` ni en las pruebas `godot -s` (los autoloads no existen todavía cuando otro script
+  lo compila). Se usa `NetService.node()` guardado en un miembro tipado (`var _net := NetService.node()`),
+  como hacen `ui/lobby.gd` y `ui/mode_menu.gd` (2026-09-18).
 
 ## Git
 - Identidad de commits **`JohanHdez <37870481+JohanHdez@users.noreply.github.com>`** (fijada en

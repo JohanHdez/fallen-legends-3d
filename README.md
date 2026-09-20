@@ -46,7 +46,8 @@ El JDK 17 está en `~/Library/Java/jdk-17` y el SDK de Android en `~/Library/And
 
 Al abrir el juego sale un **menú de inicio** sobre el mapa: eliges modo y leyenda y pulsas JUGAR
 (también con ratón, dedo o flechas y Enter). Con cualquier opción de línea de comandos, o en
-headless, se salta y se juega la Horda como siempre; `--mode=` elige directamente.
+headless, se salta y se juega la Horda como siempre; `--mode=` elige directamente. El botón
+**EN LÍNEA**, al lado de tu nombre, lleva a la sala del servidor: § "Juego en línea (en construcción)".
 
 | Modo | Qué es |
 |---|---|
@@ -806,6 +807,33 @@ Ver `assets/CREDITS.txt`. Resumen de lo que ata:
   con la misma licencia, copiados del 2D.
 - El resto (partículas y música de Kenney, cynicmusic, Juhani Junkala) es CC0.
 
+## Juego en línea (en construcción)
+
+Diseño y fases: `docs/superpowers/specs/2026-09-18-juego-en-linea-design.md` (petición del usuario,
+2026-09-18: PvP y Horda en línea, desde el APK y el navegador, con la sala del 2D y el servidor en
+Railway). **Hecho: fase 1, la sala.** En el menú, tu nombre y **EN LÍNEA** llevan a la sala del
+servidor: cada equipo en su columna con sus jugadores, su leyenda y si están listos, y los huecos
+que llenarán los bots. El primero en entrar es el líder: elige el modo (Horda o 1VS1-4VS4; en la
+Horda, cuántos sois) e inicia cuando todos han marcado ¡Listo!. El servidor sortea la semilla y
+reparte las plazas; **la partida en red llega en la fase 2**: de momento, al iniciar se avisa y se
+sigue en la sala.
+
+- El servidor es el mismo juego sin pantalla: `godot --headless --path . -- --server --transport=ws`
+  (puerto 7777, o el de la variable `PORT` en Railway). Es la única autoridad: el cliente solo pide;
+  toda regla de la sala se aplica en el servidor (`net/lobby_rules.gd`) y vuelve como estado.
+- Por defecto se conecta a `wss://fallen-legends-production.up.railway.app` (el dominio que tenía
+  el 2D; sus APK se quedarán sin servidor cuando el servicio pase a ser este). Para uno local:
+  `godot --path . -- --client=ws://127.0.0.1:7777`.
+- **En el móvil aún no conecta**: el APK sigue sin permiso de Internet hasta la fase 4.
+- Protocolo `NetService.PROTOCOL` = 100: un cliente con otra versión es rechazado con el motivo
+  (el 2D va por 3, así que un cliente del 2D no entra aquí por error).
+- El identificador de dispositivo (`net/identity.gd`) **no se difunde nunca**: el servidor lo guarda
+  para sí y a los demás solo les llega el apodo, numerado si se repite ("Kael 2").
+- Prueba: `tools/net_check.sh` (dentro de `tools/check.sh`) arranca un servidor y tres clientes sin
+  pantalla: dos entran por el menú, eligen, se ponen listos y el líder inicia un 3v3; el tercero
+  tiene otra versión y el servidor lo echa. Si el puerto está ocupado, la prueba **falla y lo dice**
+  en vez de probar contra un servidor viejo (2026-09-18).
+
 ## Opciones útiles para probar
 
 ```
@@ -849,6 +877,15 @@ Ver `assets/CREDITS.txt`. Resumen de lo que ata:
                 con la hierba alta, tu salida y por dónde entran las oleadas 1-3 (o las zonas
                 de cada equipo con --mode=2v2) y dice qué parte cae en hierba alta. Con --seed=N
                 se ve cómo cambia de una partida a otra
+--server        servidor dedicado del juego en línea (sin pantalla; no monta mapa)
+--transport=ws  el servidor por WebSocket (en Railway sale solo: hay variable PORT)
+--port=N        puerto del servidor (7777)
+--client=DIR    servidor al que va EN LÍNEA (ws://ip:puerto, wss://dominio o ip:puerto)
+--name=X        tu nombre en la sala (si no, el guardado)
+--identity=RUTA fichero de identidad propio (varias instancias en la misma máquina)
+--protocol=N    solo pruebas: fingir otra versión del protocolo
+--netprobe=X    sonda de red (tests/X.gd) bajo el autoload Net; lobby_probe admite --want-mode,
+                --want-legend, --want-team, --expect, --expect-kick, --hold y --secs
 ```
 
 Partida de bots en headless, al mejor de 3, con traza cada 5 s:
