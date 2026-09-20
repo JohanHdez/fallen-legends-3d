@@ -20,6 +20,7 @@ var _skills: Label
 var _name_edit: LineEdit
 var _online_status: Label
 var _net: NetService
+var touch := false            # lo pone main.gd: con el dedo, el menú no enseña las teclas
 
 
 func _ready() -> void:
@@ -147,10 +148,13 @@ func _ready() -> void:
 	_online_status.visible = _net.last_error != ""
 	col.add_child(_online_status)
 
-	var hint := _label(15, Color(0.7, 0.72, 0.8))
-	hint.text = "Teclado: WASD · clic / Q básica · E táctica · R definitiva · Ctrl agacharse · C cámara"
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(hint)
+	# Las teclas, solo con teclado y ratón: en el móvil no se puede hacer nada de eso y el sitio se
+	# aprovecha mejor (petición del usuario, 2026-09-20). Lo pone main.gd al crear el menú.
+	if not touch:
+		var hint := _label(15, Color(0.7, 0.72, 0.8))
+		hint.text = "Teclado: WASD · clic / Q básica · E táctica · R definitiva · Ctrl agacharse · C cámara"
+		hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		col.add_child(hint)
 	_set_mode(mode)
 	_refresh_legend()
 

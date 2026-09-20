@@ -786,6 +786,13 @@ jugar: `--badge=3`.
 **La tecla que importa es la C.** La vista alta es la comparación honesta contra tu isométrica
 actual: ahí se ve si el combate de zonas se sigue leyendo o no.
 
+**Con el dedo no se enseñan teclas** (petición del usuario, 2026-09-20: "yo estoy en un celular, a mí
+no me sirve ese texto"): en táctil desaparecen las líneas de teclado del HUD de la esquina, del menú
+de inicio y de la pausa. Queda lo que sí sirve ahí: tu leyenda, tu vida, el reloj del gas y tus
+habilidades con su munición o carga. Lo vigila `tests/hud_keys_probe.gd`, que corre en la puerta con
+y sin `--touch`: no se puede comprobar con una captura porque con `--shot` el HUD no llega a
+escribirse.
+
 ## Capturas sin jugar
 
 ```
@@ -879,7 +886,7 @@ sigue en la sala.
 --roundtime=S   tope de una ronda (por defecto 150 s)
 --autocast      en la Horda, lanza solo lo que esté listo hacia la criatura más cercana
 --probe=nombre  engancha tests/nombre.gd (rocks_probe, match_probe, decoy_probe, minimap_probe,
-                horde_probe, boss_probe, senses_probe, minion_probe) y sale con 0 o 1
+                horde_probe, boss_probe, senses_probe, minion_probe, hud_keys_probe) y sale con 0 o 1
                 seed_map_probe no comprueba nada: guarda el plano de la partida (--out=ruta.png)
                 con la hierba alta, tu salida y por dónde entran las oleadas 1-3 (o las zonas
                 de cada equipo con --mode=2v2) y dice qué parte cae en hierba alta. Con --seed=N

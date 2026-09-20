@@ -1599,6 +1599,7 @@ func _setup_menu() -> void:
 	layer.layer = 30
 	add_child(layer)
 	var menu := ModeMenu.new()
+	menu.touch = touch          # con el dedo, el menú no enseña las teclas (ver ui/mode_menu.gd)
 	layer.add_child(menu)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
@@ -2765,6 +2766,12 @@ var _log_t := 0.0
 var _last_anim := ""
 var _fx_t := 0.0
 
+## Las teclas del HUD, solo con teclado y ratón: en el móvil gastaban una o dos líneas de la esquina
+## en contarte cosas que ahí no puedes hacer (petición del usuario, 2026-09-20: "yo estoy en un
+## celular, a mí no me sirve ese texto"). Con el dedo, los botones ya se ven en pantalla.
+const KEYS_TEAM := "\nclic izq / Q básica · clic der o E táctica · R definitiva · WASD · Shift correr · Ctrl agacharse · C cámara · Esc ratón · F10 salir"
+const KEYS_HORDE := "\nclic izq / Q · clic der o E (mantener para ver el radio) · R definitiva\nWASD mover · Shift correr · Ctrl agacharse · ratón girar · rueda zoom · C cámara · Esc ratón · F10 salir"
+
 func _process(_d: float) -> void:
 	if _mode == "menu":
 		if _shot != "":
@@ -2868,10 +2875,10 @@ func _process(_d: float) -> void:
 		return
 	if team_mode != null:
 		var st := "vida %d/%d" % [int(_php), int(pf.hp_max())] if pf.alive() else "CAÍDO"
-		hud.text = ("%s  ·  %s%s\n%d FPS%s\n%s   %s   %s\n"
-			+ "clic izq / Q básica · clic der o E táctica · R definitiva · WASD · Shift correr · Ctrl agacharse · C cámara · Esc ratón · F10 salir") % [
+		hud.text = ("%s  ·  %s%s\n%d FPS%s\n%s   %s   %s%s") % [
 			pf.display_name, st, ("  ·  OCULTO" if player_hidden() else ""),
-			Engine.get_frames_per_second(), _zone_hud(), _slot(0), _slot(1), _slot(2)]
+			Engine.get_frames_per_second(), _zone_hud(), _slot(0), _slot(1), _slot(2),
+			"" if touch else KEYS_TEAM]
 		hud.text += _orders_hud()
 		return
 	var cx := int(round(player.global_position.x / CELL + mw * 0.5))
@@ -2886,11 +2893,9 @@ func _process(_d: float) -> void:
 		oculto = "  ·  AGACHADO" + ("  ·  OCULTO" if player_hidden() else "")
 	hud.text = ("%s  ·  OLEADA %d/%d   ·   criaturas vivas %d   ·   por salir %d   ·   bajas %d   ·   %s%s\n"
 		+ "%d FPS   |   %d props   |   celda %d,%d (%s)%s\n"
-		+ "%s   %s   %s\n"
-		+ "clic izq / Q · clic der o E (mantener para ver el radio) · R definitiva\n"
-		+ "WASD mover · Shift correr · Ctrl agacharse · ratón girar · rueda zoom · C cámara · Esc ratón · F10 salir") % [
+		+ "%s   %s   %s%s") % [
 		String(LEGENDS[_legend]["name"]), horde.wave if horde != null else 0, Horde.WAVES, zombies.size(),
 		horde.left_to_spawn if horde != null else 0, _kills, estado, oculto,
 		Engine.get_frames_per_second(), _props, cx, cy, zone, _zone_hud(),
-		_slot(0), _slot(1), _slot(2)]
+		_slot(0), _slot(1), _slot(2), "" if touch else KEYS_HORDE]
 	hud.text += _orders_hud()
