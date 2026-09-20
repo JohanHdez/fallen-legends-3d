@@ -25,6 +25,10 @@ if [ ! -f "$TPL_DIR/version.txt" ]; then
   echo "descomprímelo y copia su carpeta templates/ como la ruta anterior (o Editor → Administrar plantillas)." >&2
   exit 1
 fi
+# export/ está DENTRO del proyecto y el preset exporta todos los recursos (all_resources): sin este
+# fichero, Godot importa lo que haya ahí (capturas, el index.png de la web) y lo mete en el APK.
+mkdir -p export
+touch export/.gdignore
 if [ ! -d .godot/imported ]; then
   echo "== Importando recursos por primera vez (los glTF tardan)"
   "$GODOT" --headless --path . --import >/dev/null 2>&1 || true

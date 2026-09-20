@@ -15,6 +15,8 @@
 ##    2026-09-18: "cuando le pegue así sea una vez a los clones debo ser marcado").
 extends Node
 
+var _dist_hist := {}   # [bot, marcado] -> distancias de los últimos THINK s (ver abajo)
+
 var main: Node
 var _t := 0.0
 var _secs := 400.0
@@ -62,6 +64,18 @@ func _physics_process(delta: float) -> void:
 		return
 	_t += delta
 	var combat: Combat = main.combat
+	# Distancias de cada pareja en los últimos THINK s (+ 3 fotogramas): un bot solo tiene que ir a
+	# por un marcado si en su último pensamiento ya lo tenía a tiro. Antes se daba 1 m de margen, pero
+	# corriendo los dos se acercan a ~7 m/s y en 0,2 s se comen 1,4 m (lo cazó el mapa con planicies,
+	# 2026-09-18: el Clérigo pensó con el Rompemareas a 23,7 m y la sonda lo exigía a 22,4).
+	for a: Fighter in combat.fighters:
+		for b2: Fighter in combat.fighters:
+			var key := [a.id, b2.id]
+			var h: Array = _dist_hist.get(key, [])
+			h.append(a.pos().distance_to(b2.pos()))
+			if h.size() > int(BotBrain.THINK * 60.0) + 3:
+				h.pop_front()
+			_dist_hist[key] = h
 	# Las marcas que se acaban en este fotograma, antes de mirar a nadie: si no, un bot que apuntaba a
 	# un marcado que va después en la lista parecería no apuntar a ninguno.
 	for f: Fighter in combat.fighters:
@@ -102,7 +116,7 @@ func _physics_process(delta: float) -> void:
 			for o: Fighter in combat.fighters:
 				if o.brain == null or o.team != f.mark_team or not o.alive():
 					continue
-				if o.pos().distance_to(f.pos()) > BotBrain.SEARCH_RANGE - 1.0:
+				if (_dist_hist.get([o.id, f.id], [INF]) as Array).max() > BotBrain.SEARCH_RANGE:
 					continue
 				# Recién levantado (reanimado o vuelto solo): aún no ha pensado con su objetivo nuevo.
 				if o.invuln_t > Revive.INVULN - BotBrain.THINK - 0.05:
@@ -125,13 +139,34 @@ func _physics_process(delta: float) -> void:
 		_finish()
 
 
+## ¿Tiene un señuelo sin ningún rival a menos de 10 m? Tumbarla con uno en plena pelea no prueba nada:
+## el primer disparo lo rompe (2026-09-18: con los equipos en los extremos, el primer señuelo salía ya
+## con los rivales a 7 m y se rompía en el mismo fotograma).
+func _quiet_decoy(pf: Fighter) -> bool:
+	for al in main.combat.allies:
+		if al["kind"] != "decoy" or int(al.get("owner", -1)) != pf.id or float(al["hp"]) <= 0.0:
+			continue
+		var at: Vector3 = (al["node"] as Node3D).global_position
+		var calm := true
+		for o: Fighter in main.combat.fighters:
+			if o.team != pf.team and o.alive() and o.pos().distance_to(at) < 10.0:
+				calm = false
+		if calm:
+			return true
+	return false
+
+
 ## Sus señuelos la copian en todo, también derribada: la misma animación de arrastrarse, el mismo
 ## letrero encima ("¡DERRIBADO! 32 s") y a paso de arrastrarse. Si no, se sabría al momento cuál es la
 ## de verdad (petición del usuario, 2026-09-17).
 func _check_decoys(delta: float) -> void:
 	var pf: Fighter = main.pf
+	# Si el señuelo no llegó a durar con ella en el suelo (un rival lo rompió en ese mismo momento:
+	# se rompe de un golpe), se vuelve a probar cuando esté otra vez de pie.
+	if _forced and pf.alive() and not pf.downed and _downed_decoy_t < 0.2:
+		_forced = false
 	if _down_decoys and not _forced and pf.alive() and pf.invuln_t <= 0.0 \
-			and main.team_mode.rules.state == "playing" and not main.combat.decoy_alive(pf).is_empty():
+			and main.team_mode.rules.state == "playing" and _quiet_decoy(pf):
 		for o: Fighter in main.combat.fighters:
 			if o.team != pf.team and o.alive():
 				_forced = true

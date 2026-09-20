@@ -12,6 +12,10 @@ const TEX := {
 	"super_on": preload("res://assets/ui/touch/super_cargado.svg"),
 }
 
+# Cian: el verde se perdía contra la hierba en la primera captura, y el naranja ya es la munición.
+const CHG_FULL := Color(0.35, 0.9, 1.0)          # carga de la táctica lista
+const CHG_PART := Color(0.3, 0.65, 0.8, 0.8)     # la que está volviendo
+
 var main: Node = null
 
 
@@ -66,20 +70,12 @@ func _ability(b: Dictionary, font: Font) -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color(1, 1, 1))
 
 	var frac: float = main.cooldown_fraction(i)
-	if frac > 0.0 and not swap:
+	var maxc := int(main._abil(i).get("chg", 0))
+	if maxc > 0 and not swap and main.pf != null:
+		_charges(c, r, i, maxc, font)
+	elif frac > 0.0 and not swap:
 		_sector(c, r * 0.92, frac, Color(0, 0, 0, 0.55))
-		var cds: String = main.cooldown_text(i)      # segundos, o "73%" si la definitiva va por carga
-		var cs := font.get_string_size(cds, HORIZONTAL_ALIGNMENT_CENTER, -1, 22)
-		draw_string_outline(font, c + Vector2(-cs.x / 2.0, 8.0), cds,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 22, 4, Color(0, 0, 0, 0.9))
-		draw_string(font, c + Vector2(-cs.x / 2.0, 8.0), cds,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1, 1, 0.8))
-	elif int(main._abil(i).get("chg", 0)) > 0 and not swap:
-		var chs := "%d/%d" % [main._chg[i], int(main._abil(i)["chg"])]
-		var cs2 := font.get_string_size(chs, HORIZONTAL_ALIGNMENT_CENTER, -1, 16)
-		var at: Vector2 = c + Vector2(r * 0.55 - cs2.x / 2.0, r * 0.8)
-		draw_string_outline(font, at, chs, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, 4, Color(0, 0, 0, 0.9))
-		draw_string(font, at, chs, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.8, 1.0, 0.6))
+		_center_text(c, main.cooldown_text(i), font)   # segundos, o "73%" si la definitiva va por carga
 
 	# Munición de la básica por equipos: un arco por disparo alrededor del botón, como la barra
 	# que va debajo de tu vida.
@@ -160,7 +156,9 @@ func _round(tex: Texture2D, center: Vector2, radius: float, tint: Color) -> void
 
 
 ## Un arco por disparo, desde las 12 en sentido horario: lleno, a medias (el que vuelve) o vacío.
-func _ammo_arcs(center: Vector2, radius: float, n: int, level: float) -> void:
+## Lo usan la munición de la básica (naranja) y las cargas de la táctica (cian).
+func _ammo_arcs(center: Vector2, radius: float, n: int, level: float,
+		full := AmmoBar.COL_FULL, part := AmmoBar.COL_PART) -> void:
 	var span := TAU / float(n)
 	var gap := 0.16
 	for k in n:
@@ -169,8 +167,39 @@ func _ammo_arcs(center: Vector2, radius: float, n: int, level: float) -> void:
 		draw_arc(center, radius, a0, a1, 24, Color(0, 0, 0, 0.6), 8.0, true)
 		var fill := AmmoBar.segment_fill(level, k)
 		if fill > 0.0:
-			var col := AmmoBar.COL_PART if AmmoBar.is_partial(level, k) else AmmoBar.COL_FULL
+			var col := part if AmmoBar.is_partial(level, k) else full
 			draw_arc(center, radius, a0, a0 + (a1 - a0) * fill, 24, col, 5.0, true)
+
+
+## Táctica con cargas (Trampa eléctrica, Alzar esqueleto, Baliza Nox): un arco por carga alrededor
+## del botón, lleno si se puede lanzar y creciendo el que vuelve, y los segundos que le faltan
+## (petición del usuario, 2026-09-18). Antes el botón se ensombrecía nada más gastar una aunque
+## quedaran dos, y el "2/3" solo salía con todas llenas: no se sabía cuántas quedaban.
+func _charges(c: Vector2, r: float, i: int, maxc: int, font: Font) -> void:
+	_ammo_arcs(c, r + 7.0, maxc, main.pf.charge_level(i), CHG_FULL, CHG_PART)
+	var left: float = main.pf.cooldown_left(i)
+	if left <= 0.0:
+		return
+	var secs := "%.1f" % left
+	if int(main._chg[i]) == 0:
+		# Sin ninguna: sombra y segundos en grande, como una recarga normal.
+		_sector(c, r * 0.92, main.cooldown_fraction(i), Color(0, 0, 0, 0.55))
+		_center_text(c, secs, font)
+		return
+	# Quedan cargas: el botón sigue encendido y el contador va pequeño, abajo a la derecha.
+	var cs := font.get_string_size(secs, HORIZONTAL_ALIGNMENT_CENTER, -1, 17)
+	var at: Vector2 = c + Vector2(r * 0.62 - cs.x / 2.0, r * 0.82)
+	draw_string_outline(font, at, secs, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, 4, Color(0, 0, 0, 0.9))
+	draw_string(font, at, secs, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, CHG_FULL)
+
+
+## Texto grande en el centro de un botón (segundos de recarga o "73%" de la definitiva).
+func _center_text(c: Vector2, txt: String, font: Font) -> void:
+	var cs := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 22)
+	draw_string_outline(font, c + Vector2(-cs.x / 2.0, 8.0), txt,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 22, 4, Color(0, 0, 0, 0.9))
+	draw_string(font, c + Vector2(-cs.x / 2.0, 8.0), txt,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1, 1, 0.8))
 
 
 ## Sector desde las 12 en sentido horario con la recarga pendiente.

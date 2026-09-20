@@ -117,19 +117,32 @@ Reglas por equipos (a petición del usuario, 2026-09-16):
 - **Ritmo de pelea** (a petición del usuario, 2026-09-16, tras medir peleas de ~7 s):
   - **Vida ×3** en todas las leyendas. La curación y el daño del gas también van ×3, para que no
     pierdan peso.
-  - **Definitiva por carga**, no por recarga: empieza vacía en cada ronda y se llena con el daño que
-    haces con la básica y la táctica (el de 6 s de tu básica sin fallar, ×3 por la vida), más un
-    goteo de 45 s por si no pegas. Lo que hace la propia definitiva no la recarga. El botón enseña
-    el porcentaje.
+  - **Definitiva por carga**, no por recarga: empieza vacía al principio de la partida y se llena con
+    el daño que haces con la básica y la táctica (el de 6 s de tu básica sin fallar, ×3 por la vida),
+    más un goteo de 45 s por si no pegas. Lo que hace la propia definitiva no la recarga. El botón
+    enseña el porcentaje. **La carga pasa de una ronda a la siguiente** (petición del usuario,
+    2026-09-18; antes se vaciaba en cada ronda): si acabas la ronda al 60 %, empiezas la otra al
+    60 %, y si la tenías lista, la tienes lista. Las demás ranuras empiezan cada ronda enteras.
   - **Las básicas teledirigidas pueden fallar**: vuelan recto hacia donde apuntaste, solo corrigen
     en los últimos 2 m y como mucho 40°/s, impactan al tocar a alguien por el camino y se apagan al
     llegar a su alcance. En la Horda siguen sin fallar.
-  - **Mapa más corto**: el área limpia arranca al 65 % del mapa, así que las zonas de salida quedan
-    más cerca y cuevas y esquinas son gas desde el principio. El gas espera 25 s y cierra ×1,5.
+  - **Equipos en los extremos** (petición del usuario, 2026-09-18: "no hagas los equipos tan cerca,
+    hazlos en extremos, para que las peleas se hagan entretenidas"): el área limpia arranca con el
+    **mapa entero** y cada zona de salida va al 80 % de su radio, así que los equipos salen a
+    **102 m** de las 126 que mide el mapa (antes, 48 m). Hasta entonces el área limpia arrancaba al
+    65 % precisamente para acercarlos (2026-09-16). El gas espera 25 s y cierra **×2,6** (antes
+    ×1,5): empezando con el mapa entero, a ×1,5 tardaba ~172 s en cerrarse, las rondas (150 s)
+    acababan por tiempo sin que cayera nadie y un 1v1 duraba 369 s; a ×2,6 llega al final a los
+    ~110 s, como antes, y el mismo 1v1 se decide por eliminación en 186 s. Por ahora salen siempre
+    oeste contra este: es la dirección con más campo abierto en los dos extremos.
   - **Munición en la básica** (idea del usuario, estilo Brawl; el 2D no la tiene): 3 disparos que
     vuelven de uno en uno. Se pueden soltar seguidos y luego hay que esperar, así que fallar cuesta.
     Se ve en tres segmentos naranjas bajo tu vida y en arcos alrededor del botón de ataque; sin
-    munición suena a hueco y la barra parpadea. Solo ves la tuya. **La Ilusionista no tiene**: no
+    munición suena a hueco y la barra parpadea. Solo ves la tuya. Las **tácticas con cargas**
+    (Trampa eléctrica, Alzar esqueleto, Baliza Nox: 3 cada una) enseñan lo mismo en su botón con
+    arcos **cian**, uno por carga, creciendo el que vuelve y con los segundos que le faltan en
+    pequeño; el botón solo se ensombrece cuando no queda ninguna (2026-09-18: antes se ensombrecía
+    al gastar la primera y no se sabía cuántas quedaban). **La Ilusionista no tiene**: no
     tiene habilidades de daño y su ventaja es la cantidad de disparos. La carga de la definitiva se
     calcula igual que sin munición (rebajarla casi duplicaba las definitivas).
 
@@ -610,7 +623,7 @@ reutiliza: compilarlo por burbuja cuesta y se filtra, y la guardia se enciende y
 ## Gas demoníaco: la zona que se cierra
 
 **Pensado para PvP** (1v1 a 4v4, petición del usuario). Corre en la Horda y en los modos por
-equipos; en estos arranca al 65 % del mapa, espera 25 s, cierra ×1,5 más rápido, quema ×3 y se
+equipos; en estos arranca con el mapa entero (al 65 % hasta el 2026-09-18), espera 25 s, cierra ×2,6 más rápido (×1,5 cuando arrancaba al 65 %), quema ×3 y se
 reinicia en cada ronda (ver "Menú y modos
 de juego"). Daña a todas las leyendas y criaturas que pille fuera. `--nozone` lo apaga.
 
@@ -674,12 +687,26 @@ lo que bloquea), y el mapa se redibuja 20 veces por segundo, no en cada fotogram
   ve continua y no hay huecos con pared invisible.
 - **Lápidas** del cementerio: medían 31 × 37 cm y no chocaban; ahora ~75 × 90 cm con caja de
   colisión, y las criaturas brotan sobre la losa, delante de la piedra.
-- **Tres alturas de hierba** (petición del usuario, 2026-09-17; `MapLayout.grass_tier`):
-  **alta** (`tall_grass`, 16 manchas de hasta 3 celdas de radio): el triple de matas, solo las
-  variedades altas y a escala 1,0-1,5, para que se vea de lejos que ahí cabe alguien — y es la única
-  donde te escondes; **media** (`mid_grass`, 22 manchas de hasta 5 celdas): por la cintura, escala
-  0,75-1,05 y densidad intermedia, **solo paisaje: no esconde a nadie**; y **matas bajas** en el
-  resto de la pradera (0,45-0,8).
+- **Cuatro alturas de hierba** (peticiones del usuario, 2026-09-17 y 2026-09-18;
+  `MapLayout.grass_tier` y `MapLayout.TUFT_H`), **en metros** y no a escala, porque los modelos de
+  mata miden de 1,07 a 1,87 m: a escala, hasta las "bajas" llegaban al pecho, la media a 2 m y la
+  alta a 2,8, y todo el campo tapaba a las leyendas (el cuello está a 1,55 m).
+  - **Alta** (`tall_grass`, 16 manchas de hasta 3 celdas de radio), **1,2-1,6 m**: el triple de
+    matas, solo las variedades altas. Es la única donde te escondes: agachado quedas dentro, y de
+    pie te asoma la cabeza, igual que la regla (de pie te ven).
+  - **Media** (`mid_grass`, 22 manchas de hasta 5 celdas), **0,65-0,95 m**, por la cintura: **solo
+    paisaje, no esconde a nadie**.
+  - **Matas bajas** en el resto de la pradera, **0,25-0,48 m**, solo las variedades cortas.
+  - **Planicie** (`plains`), **0,12-0,28 m** y la mitad de matas: campo casi raso donde se ve venir
+    a cualquiera ("está bien tener arbustos altos, pero también tenemos que tener planicies").
+    Salen con la semilla de la partida, antes que la hierba alta, que ya no puede caer encima: **una
+    donde sales** en la Horda (4 celdas de radio) y **una en cada zona de salida** por equipos, más 6
+    repartidas (hasta 5 celdas). Las zonas de salida por equipos evitan además la hierba alta
+    (`GameModes.spawn_areas(..., avoid)`) y los peñascos no caen en esas planicies (evitando la
+    hierba alta caían justo ahí y la zona de salida se iba a otro sitio). Medido con
+    `seed_map_probe` en 8 partidas de cada modo: antes salías en hierba alta en 3 de 6 partidas de la
+    Horda y las zonas de 2v2 estaban del 40 al 91 % en ella; ahora, 0 % en todas. La hierba alta
+    pasó de 290-347 celdas a 140-258 (del 15 al 30 % de la pradera).
 - **Eriales** (7 manchas, zona 3 de `zones`): tierra pelada con guijarros y algún matojo seco, sin
   hierba, y las rocas del mapa que caen ahí salen de roca en vez de árbol. Da mezcla de pasto, tierra
   y roca sin tocar el generador del 2D: las manchas se marcan en el 3D, antes de construir el suelo
@@ -818,6 +845,10 @@ Ver `assets/CREDITS.txt`. Resumen de lo que ata:
 --autocast      en la Horda, lanza solo lo que esté listo hacia la criatura más cercana
 --probe=nombre  engancha tests/nombre.gd (rocks_probe, match_probe, decoy_probe, minimap_probe,
                 horde_probe, boss_probe, senses_probe, minion_probe) y sale con 0 o 1
+                seed_map_probe no comprueba nada: guarda el plano de la partida (--out=ruta.png)
+                con la hierba alta, tu salida y por dónde entran las oleadas 1-3 (o las zonas
+                de cada equipo con --mode=2v2) y dice qué parte cae en hierba alta. Con --seed=N
+                se ve cómo cambia de una partida a otra
 ```
 
 Partida de bots en headless, al mejor de 3, con traza cada 5 s:

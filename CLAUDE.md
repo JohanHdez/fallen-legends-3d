@@ -17,7 +17,7 @@ todo el equipo y se gana superando la oleada 10) y **1v1, 2v2, 3v3, 4v4**
 contra bots **al mejor de 3 rondas por eliminación**; en los dos, un compañero agachado a tu lado te
 levanta o vuelves solo a los 15/30/60 s. Por equipos, con vida
 ×3, definitiva por carga, básicas que pueden fallar, munición en la básica (menos la Ilusionista) y
-área limpia al 65 % (reglas en el README). 7 leyendas
+equipos que salen en los extremos del mapa (reglas en el README). 7 leyendas
 en rotación con 21 habilidades (más 3 retiradas), ciclo día/noche, gas que cierra el mapa,
 regeneración tras 10 s sin daño, controles táctiles y pausa.
 
@@ -134,8 +134,10 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
 - **Criaturas**: `SPECIES`; se mueven con un campo de flujo BFS compartido cada 0,4 s. **Bots**:
   cada uno su camino con `NavGrid`.
 - **Terreno**: sobre la pradera, `main._build_grass_fields` reparte manchas ANTES de construir el
-  suelo: eriales (`zones` = 3: tierra y piedras), hierba alta (`tall_grass`, la única que esconde) y
-  hierba media (`mid_grass`, solo paisaje). `MapLayout.grass_tier` decide la altura de cada celda.
+  suelo: eriales (`zones` = 3: tierra y piedras), planicies (`plains`, casi rasas; una en cada salida,
+  `spawn_clear`, sin hierba alta ni peñascos), hierba alta (`tall_grass`, la única que esconde) y
+  hierba media (`mid_grass`, solo paisaje). `MapLayout.grass_tier` decide el nivel de cada celda y
+  `MapLayout.TUFT_H` su alto en metros. `tests/seed_map_probe.gd` dibuja el plano de una semilla.
 - **Mapa**: `MapBuilder` guarda `grid[y][x]`; `main.gd` lo **transpone una vez** (`MapLayout.transpose`)
   y lee `grid[x][y]`; las llamadas a MapBuilder usan `_mb_grid`/`_mb_zones`. Colisión de rejilla (caja
   de 3 m por celda bloqueada); los **peñascos** ocupan una celda (pasa a `MOUNTAIN`) y chocan con su
@@ -188,7 +190,8 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
 - `match` es palabra reservada en GDScript. Clase nueva (`class_name`) → `godot --import` antes de
   usarla desde otro script (el hook y `tools/check.sh` ya lo hacen).
 - Flags de prueba: `--clave=valor` tras `--`, documentadas en el README. Trazas de consola con
-  prefijo entre corchetes (`[HORDA]`, `[PARTIDA]`, `[RONDA]`, `[BAJA]`, `[FIN]`, `[SONDA]`, `[ROCAS]`).
+  prefijo entre corchetes (`[HORDA]`, `[PARTIDA]`, `[RONDA]`, `[BAJA]`, `[FIN]`, `[SONDA]`, `[ROCAS]`,
+  `[PLANO]` el plano de una semilla).
 - `.uid` junto a cada script **se versiona**; `.import` no.
 - Specs y planes en `docs/superpowers/specs/` y `docs/superpowers/plans/` (`AAAA-MM-DD-<tema>-design.md`).
 
@@ -255,5 +258,8 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
   y `MatchHud` están escritos para Azul contra Rojo.
 - **`project.godot` dice `config/features=("4.3", …)`** con motor 4.7.2 (el editor lo actualiza).
 - **`--shot` en headless** imprime `ERROR: Parameter "t" is null`; `tools/check.sh` lo filtra.
+- **`export/` lleva un `.gdignore`** (lo crea `tools/build.sh`): está dentro del proyecto y el preset
+  exporta todos los recursos, así que sin él cualquier PNG que se deje ahí (capturas, el `index.png`
+  de la web) se importa y acaba dentro del APK. Las capturas para el usuario pueden ir ahí.
 - **Sin icono de lanzador**; **sin keystore de release**;
   **sin atribución CC-BY-SA visible en el juego**; las insignias de 64 px pesan 19 MB.

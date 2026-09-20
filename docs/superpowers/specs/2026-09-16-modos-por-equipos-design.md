@@ -70,9 +70,9 @@ Se eligen 3 s: el reparto más igualado. Las peleas 1v1 entre bots pasan a durar
 | Ronda | la gana el equipo que deja al rival sin nadie en pie; desde el 2026-09-17 los caídos se levantan o vuelven solos (spec de la Horda en equipo); eliminación mutua = nadie suma | usuario |
 | Descanso entre rondas | 4 s; se limpia el mundo, todos a su zona de salida con vida y recargas llenas, gas nuevo | diseño |
 | Tope de ronda | 150 s; decide quien tenga más en pie y luego más vida | diseño |
-| Gas por rondas | arranca al 65 % del mapa, espera 25 s, cierra ×1,5 y quema ×3 (en la Horda: todo el mapa, 120 s, ×1) | usuario: mapa más corto |
+| Gas por rondas | arranca con el mapa entero (al 65 % hasta el 2026-09-18, cuando el usuario pidió los equipos en los extremos), espera 25 s, cierra ×2,6 (×1,5 cuando arrancaba al 65 %) y quema ×3 (en la Horda: todo el mapa, 120 s, ×1) | usuario |
 | Vida | ×3 en todas las leyendas; curación ×3 | usuario |
-| Definitiva | por carga: vacía al empezar cada ronda; se llena con el daño de básica y táctica (6 s de la básica sin fallar × multiplicador de vida) y un goteo de 45 s; su propio daño no la recarga | usuario |
+| Definitiva | por carga: vacía al empezar la partida y la carga pasa de una ronda a otra (2026-09-18; al principio se vaciaba en cada ronda); se llena con el daño de básica y táctica (6 s de la básica sin fallar × multiplicador de vida) y un goteo de 45 s; su propio daño no la recarga | usuario |
 | Básicas teledirigidas | pueden fallar: vuelan recto, corrigen solo en los últimos 2 m a 40°/s, impactan por contacto y se apagan en su alcance | usuario |
 | Munición de la básica | 3 disparos que vuelven de uno en uno (1,0 s; Rey liche 1,15; Rompemareas 1,4): −40 % de daño sostenido a distancia, −20 % cuerpo a cuerpo; la Ilusionista sin límite; barra bajo tu vida y arcos en el botón; la carga de la definitiva no cambia | usuario |
 | Pistola de la Ilusionista | ×1,6 (9 → 14,4); solo por equipos | usuario |

@@ -91,6 +91,9 @@ do_smoke() {
 # Sondas: enganchadas a la partida con --probe=nombre. Cada una sale con 0 (bien) o 1 (fallo).
 PROBES=(
   "rocks_probe --secs=30"
+  "seed_map_probe --seed=4242 --touch"
+  "seed_map_probe --seed=4242 --mode=2v2"
+  "seed_map_probe --seed=31337 --mode=4v4"
   "match_probe --mode=1v1 --autoplay --secs=600"
   "match_probe --mode=4v4 --autoplay --secs=600"
   "decoy_probe --mode=2v2 --legend=2 --autoplay --secs=400"

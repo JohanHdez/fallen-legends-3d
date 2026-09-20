@@ -129,11 +129,31 @@ static func fit_transform(fit: Dictionary, yaw: float, at: Vector3, y_stretch :=
 ## Orden sorteado con `rng`: determinista por semilla. No modifica `grid`.
 ## Altura de la hierba de una celda (petición del usuario, 2026-09-17: "zonas con pasto a la mitad de
 ## los personajes, otras con pasto alto"): 2 = alta (donde te escondes agachado), 1 = media (por la
-## cintura, solo vista) y 0 = matas bajas. La alta manda sobre la media.
-static func grass_tier(tall: bool, mid: bool) -> int:
+## cintura, solo vista), 0 = matas bajas y PLAIN = planicie, casi rasa (2026-09-18: "está bien tener
+## arbustos altos, pero también tenemos que tener planicies"). La alta manda sobre todo; la planicie,
+## sobre la media.
+const PLAIN := -1
+
+## Alto en metros de las matas de cada nivel, de menos a más. Van por metros y no por escala porque
+## los modelos de Quaternius miden de 1,07 a 1,87 m: a escala las "bajas" llegaban a 1,5 m, la media
+## a 2 y la alta a 2,8, y todo el campo tapaba a las leyendas (el cuello está a 1,55 m). La alta
+## esconde a quien está agachado y deja asomar la cabeza de quien está de pie, como la regla.
+const TUFT_H := {PLAIN: [0.12, 0.28], 0: [0.25, 0.48], 1: [0.65, 0.95], 2: [1.2, 1.6]}
+
+
+static func grass_tier(tall: bool, mid: bool, plain := false) -> int:
 	if tall:
 		return 2
+	if plain:
+		return PLAIN
 	return 1 if mid else 0
+
+
+## Escala para que una mata de `model_h` metros mida lo que toca a su nivel; `u` (0..1) elige dentro
+## del margen.
+static func tuft_scale(model_h: float, tier: int, u: float) -> float:
+	var r: Array = TUFT_H.get(tier, TUFT_H[0])
+	return lerpf(float(r[0]), float(r[1]), clampf(u, 0.0, 1.0)) / maxf(model_h, 0.01)
 
 
 static func pick_cover_cells(grid: Array, zones: Array, avoid: Array, home: Vector2i, count: int,

@@ -64,7 +64,7 @@ func _ready() -> void:
 	col.add_child(modes)
 	var group := ButtonGroup.new()
 	for id in GameModes.ORDER:
-		var b := _button("Horda" if id == "horda" else id.to_upper(), Vector2(128, 64), 26)
+		var b := _button(GameModes.short_name(id), Vector2(128, 64), 26)
 		b.toggle_mode = true
 		b.button_group = group
 		b.pressed.connect(_set_mode.bind(id))

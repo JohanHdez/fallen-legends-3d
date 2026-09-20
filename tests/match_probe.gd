@@ -6,6 +6,8 @@
 ## Imprime rondas, bajas por leyenda y qué tipos de habilidad se lanzaron. Salida 0 si todo va bien.
 ## Munición de la básica: todas la tienen salvo la Ilusionista, nunca se sale de 0..máximo y alguien
 ## llega a gastarla (si no, no está enganchada al lanzamiento).
+## La definitiva cargada pasa a la ronda siguiente (petición del usuario, 2026-09-18): al cambiar de
+## ronda nadie empieza con menos carga de la que tenía.
 extends Node
 
 var main: Node
@@ -24,6 +26,11 @@ var _stuck_down := ""        # alguien derribado mucho más de lo que permiten l
 var _downs := 0              # derribos vistos
 var _down_ends := {"levantada": [], "muerta": []}   # cuánto duró cada derribo, según cómo acabó
 var _anims := {}             # animaciones de movimiento que se han visto
+var _round_seen := 1         # ronda del fotograma anterior
+var _ult_prev := {}          # id -> carga de la definitiva en el fotograma anterior
+var _ult_lost: Array = []    # quien empezó una ronda con menos carga de la que acabó la anterior
+var _ult_carried := 0        # leyendas que llegaron a una ronda nueva con carga
+var _foe_min := 1.0          # la menor fracción de vida a la que llegó un rival de tu equipo
 
 
 func _ready() -> void:
@@ -48,6 +55,18 @@ func _physics_process(delta: float) -> void:
 	if main.team_mode == null:
 		return
 	_t += delta
+	var round_now: int = main.team_mode.rules.round
+	if round_now != _round_seen:
+		for f in main.combat.fighters:
+			var before := float(_ult_prev.get(f.id, 0.0))
+			if before > 0.05:
+				_ult_carried += 1
+				if f.ult_charge < before - 0.01 and _ult_lost.size() < 4:
+					_ult_lost.append("%s acabó la ronda %d con la definitiva al %d %% y empezó la %d al %d %%" % [
+						f.display_name, _round_seen, int(before * 100.0), round_now, int(f.ult_charge * 100.0)])
+		_round_seen = round_now
+	for f in main.combat.fighters:
+		_ult_prev[f.id] = f.ult_charge
 	for f in main.combat.fighters:
 		if f.anim != null and f.anim.current_animation != "":
 			_anims[f.anim.current_animation] = true
@@ -60,6 +79,8 @@ func _physics_process(delta: float) -> void:
 			_first_hit = _t
 		if f.hp() < float(_prev_hp[f.id]):
 			_hurt[f.team] += float(_prev_hp[f.id]) - f.hp()
+		if f.team != main.pf.team and f.alive():
+			_foe_min = minf(_foe_min, f.hp() / maxf(f.hp_max(), 1.0))
 		_prev_hp[f.id] = f.hp()
 		if f.ammo < 0 or f.ammo > f.ammo_max:
 			if _rules_bad.size() < 4:
@@ -112,6 +133,9 @@ func _finish(rules: TeamMatch) -> void:
 	if _first_hit < 0.0 or _first_hit > 45.0:
 		problems.append("tardan demasiado en encontrarse (primer golpe a %.0f s)" % _first_hit)
 	problems.append_array(_rules_bad)
+	problems.append_array(_ult_lost)
+	if rules.round >= 2 and _ult_carried == 0:
+		problems.append("nadie llegó a una ronda nueva con carga en la definitiva: no se ha probado que pase")
 	if _stuck_down != "":
 		problems.append("%s estuvo derribada más de %.0f s: el derribo no se resuelve" % [_stuck_down, Revive.BLEED_TIME * 2.0])
 	# Con la biblioteca Pro cada dirección tiene su animación (petición del usuario, 2026-09-17): en
@@ -127,9 +151,12 @@ func _finish(rules: TeamMatch) -> void:
 		problems.append("nadie se quejó al recibir un golpe (falta la animación de daño)")
 	if not _anims.has("Idle_Tired"):
 		problems.append("nadie se quedó encorvado con menos de media vida")
-	# El aviso de media vida tiene que sonar en una partida entera (petición del usuario, 2026-09-17).
-	if main.combat.half_cues == 0:
-		problems.append("nunca sonó el aviso de media vida")
+	# El aviso de media vida tiene que sonar en una partida entera (petición del usuario, 2026-09-17)...
+	# si algún rival llegó a bajar de la mitad: suena cuando TU equipo deja a uno por debajo. En un 1v1
+	# muy desigual (el Clérigo le ganó 2-0 al Tormentero sin bajar nunca de la mitad, 2026-09-18) no
+	# tiene por qué sonar.
+	if main.combat.half_cues == 0 and _foe_min < 0.45:
+		problems.append("nunca sonó el aviso de media vida (y un rival llegó al %d %%)" % int(_foe_min * 100.0))
 	if not _ammo_spent:
 		problems.append("nadie gastó munición: la básica no la usa")
 	# Toxina: si jugó un Clérigo y acertó alguna básica, tiene que haber envenenado (petición del
@@ -163,8 +190,10 @@ func _finish(rules: TeamMatch) -> void:
 		int(main.combat.casts.get("trap", 0)), main.combat.traps_on_top, main.combat.traps_sprung,
 		int(main.combat.casts.get("beacon", 0)), main.combat.beacons_popped])
 	print("[SONDA] rayos de tormenta: %d" % main.combat.storm_strikes)
-	print("[SONDA] toxina del Clérigo: %.0f de daño · avisos de media vida: %d" % [
-		main.combat.toxin_damage, main.combat.half_cues])
+	print("[SONDA] definitiva entre rondas: %d veces una leyenda llegó a la ronda nueva con carga, %d la perdieron" % [
+		_ult_carried, _ult_lost.size()])
+	print("[SONDA] toxina del Clérigo: %.0f de daño · avisos de media vida: %d (el rival más tocado llegó al %d %%)" % [
+		main.combat.toxin_damage, main.combat.half_cues, int(_foe_min * 100.0)])
 	var anim_list: Array = _anims.keys()
 	anim_list.sort()
 	print("[SONDA] animaciones vistas: %s" % ", ".join(anim_list))

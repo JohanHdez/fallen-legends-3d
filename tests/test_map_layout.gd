@@ -177,3 +177,22 @@ func _test_grass_tier() -> void:
 	_check(MapLayout.grass_tier(false, true) == 1, "mancha media: hierba por la cintura")
 	_check(MapLayout.grass_tier(true, false) == 2, "mancha alta: hierba para esconderse")
 	_check(MapLayout.grass_tier(true, true) == 2, "si coinciden, manda la alta")
+	# Planicies (petición del usuario, 2026-09-18: "tenemos que tener planicies"): sin hierba media
+	# encima; la alta ya las evita al repartirse.
+	_check(MapLayout.grass_tier(false, true, true) == MapLayout.PLAIN, "en una planicie no crece la media")
+	_check(MapLayout.grass_tier(false, false, true) == MapLayout.PLAIN, "planicie sin mancha: planicie")
+	_check(MapLayout.grass_tier(true, false, true) == 2, "si una alta cae encima, manda la alta")
+	# Alturas de verdad de cada nivel, sea cual sea el modelo de mata (los de Quaternius miden de
+	# 1,07 a 1,87 m): antes las "bajas" llegaban a 1,5 m y la alta a 2,8, y todo el campo tapaba.
+	for model_h: float in [1.07, 1.33, 1.67, 1.87]:
+		for u: float in [0.0, 0.5, 1.0]:
+			var low := model_h * MapLayout.tuft_scale(model_h, 0, u)
+			var mid := model_h * MapLayout.tuft_scale(model_h, 1, u)
+			var tall := model_h * MapLayout.tuft_scale(model_h, 2, u)
+			var plain := model_h * MapLayout.tuft_scale(model_h, MapLayout.PLAIN, u)
+			_check(plain <= 0.3, "mata de planicie de %.2f m (máximo 0,3)" % plain)
+			_check(low <= 0.5, "mata baja de %.2f m: tiene que quedar por debajo de la rodilla" % low)
+			_check(mid >= 0.6 and mid <= 1.0, "hierba media de %.2f m: tiene que ir por la cintura" % mid)
+			# La alta esconde a quien está agachado (~1,1 m) pero no a quien está de pie: la cabeza
+			# (el cuello está a 1,55 m) asoma, igual que la regla, que solo esconde agachado.
+			_check(tall >= 1.15 and tall <= 1.65, "hierba alta de %.2f m (entre 1,15 y 1,65)" % tall)

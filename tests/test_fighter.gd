@@ -79,6 +79,7 @@ func _init() -> void:
 
 	_test_ammo()
 	_test_mark_and_damage()
+	_test_charges()
 
 	print("test_fighter: %s (%d fallos)" % ["OK" if failures == 0 else "FALLO", failures])
 	quit(1 if failures > 0 else 0)
@@ -173,3 +174,28 @@ func _test_mark_and_damage() -> void:
 			_check(is_equal_approx(l.ult_need(), need * l.basic_dmg_mult), "su definitiva pide su daño de verdad")
 		else:
 			_check(is_equal_approx(l.basic_dmg_mult, 1.0), "%s: su básica no cambia por equipos" % id)
+
+
+## Habilidades con cargas (Trampa eléctrica, Alzar esqueleto, Baliza Nox): el botón enseña un arco
+## por carga, lleno si se puede lanzar y a medias el que está volviendo (petición del usuario,
+## 2026-09-18: "genera la cantidad de poderes que puede lanzar como una barra por cada uno y el
+## contador de recarga").
+func _test_charges() -> void:
+	var t := _fighter(0)                      # Tormentero: Trampa eléctrica, 3 cargas, 10 s cada una
+	var cd := float(t.abil(1)["cd"])
+	_check(is_equal_approx(t.charge_level(1), 3.0), "con las tres cargas la barra está llena: %.2f" % t.charge_level(1))
+	# Gasta dos (como Combat.start_cast): la primera pone a volver una, la segunda no la reinicia.
+	t.chg[1] -= 1
+	t.chg_t[1] = cd
+	t.chg[1] -= 1
+	_check(is_equal_approx(t.charge_level(1), 1.0), "con una carga y otra empezando a volver: %.2f" % t.charge_level(1))
+	_check(t.ability_ready(1), "con una carga se puede lanzar")
+	t.tick_cooldowns(cd * 0.5)
+	_check(is_equal_approx(t.charge_level(1), 1.5), "a media vuelta la segunda va por la mitad: %.2f" % t.charge_level(1))
+	_check(is_equal_approx(t.cooldown_left(1), cd * 0.5), "el contador dice lo que falta para la siguiente: %.1f" % t.cooldown_left(1))
+	t.tick_cooldowns(cd * 0.5)
+	_check(t.chg[1] == 2 and is_equal_approx(t.charge_level(1), 2.0), "vuelve una y empieza la siguiente: %.2f" % t.charge_level(1))
+	t.chg[1] = 0
+	t.chg_t[1] = cd
+	_check(is_equal_approx(t.charge_level(1), 0.0) and not t.ability_ready(1), "sin cargas la barra está vacía y no se puede lanzar")
+	_check(is_equal_approx(t.charge_level(0), 0.0), "una ranura sin cargas no tiene barra")

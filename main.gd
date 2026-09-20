@@ -26,6 +26,12 @@ const GRASS_RADIUS := 3        # celdas de radio de cada mancha
 # rocas". La media NO esconde a nadie (eso es solo la alta): es puro paisaje.
 const MID_FIELDS := 22         # manchas de hierba media
 const MID_RADIUS := 5
+# Planicies: campo casi raso donde se ve venir a cualquiera (petición del usuario, 2026-09-18: "está
+# bien tener arbustos altos, pero también tenemos que tener planicies"). Salen con la semilla de la
+# partida, como la hierba alta, que ya no puede caer encima; una va siempre donde sales.
+const PLAIN_FIELDS := 6
+const PLAIN_RADIUS := 5
+const PLAIN_START := 4         # radio de la planicie de tu salida
 const DIRT_FIELDS := 7         # eriales: tierra pelada con piedras
 const DIRT_RADIUS := 4
 const COVER_ROCKS := 50        # peñascos sueltos por el campo, para cubrirse (uno por celda despejada)
@@ -179,6 +185,9 @@ var _mb_zones: Array
 var _cover_cells := {}            # Vector2i -> true: celdas ocupadas por un peñasco de cobertura
 var tall_grass: Array             # [x][y] true = hierba alta: agachado ahí no te ven
 var mid_grass: Array              # [x][y] true = hierba media: solo se ve, no esconde
+var plains: Array                 # [x][y] true = planicie: hierba rasa, ni media ni alta
+var spawn_clear: Array            # [x][y] true = planicie de una salida: ni hierba alta ni peñascos
+var _start_cell := Vector2i(-1, -1)   # tu salida, sorteada una vez (ver _spawn_cell)
 var mw := 0
 var mh := 0
 var rng := RandomNumberGenerator.new()
@@ -863,14 +872,46 @@ func _terrain_rng(salt: int) -> RandomNumberGenerator:
 func _build_grass_fields() -> void:
 	tall_grass = _empty_map()
 	mid_grass = _empty_map()
-	# La hierba ALTA sigue saliendo del sorteo de la partida, en el mismo momento y con el mismo mapa
-	# de zonas de siempre (sin eriales): es la que esconde, y moverla movería los peñascos de
-	# cobertura, que la evitan. Si una mancha cae sobre un erial, allí crece hierba igual.
-	var tall := _spread(rng, tall_grass, GRASS_FIELDS, 2, GRASS_RADIUS, [], _zones_without_dirt())
-	# La MEDIA es solo paisaje y va con su propio sorteo. Puede tocar la alta: donde coinciden manda
-	# la alta (MapLayout.grass_tier).
+	plains = _empty_map()
+	# PLANICIES primero, con el sorteo de la partida: una donde sales (antes, una de cada dos veces
+	# salías metido en hierba alta; por equipos, una en cada zona de salida) y el resto repartidas.
+	spawn_clear = _empty_map()
+	if GameModes.is_pvp(_mode):
+		var zone_on := not _args.has("nozone")
+		var areas := GameModes.spawn_areas(grid, zones, TeamMode.area_radius(mw, mh, zone_on))
+		for team in [1, 2]:
+			var cells: Array = areas.get(team, [])
+			if not cells.is_empty():
+				_disc(spawn_clear, cells[0], PLAIN_START + 1)
+	else:
+		_disc(spawn_clear, _spawn_cell(), PLAIN_START)
+	var flat := 0
+	for x in mw:
+		for y in mh:
+			if spawn_clear[x][y]:
+				plains[x][y] = true
+				flat += 1
+	flat += _spread(rng, plains, PLAIN_FIELDS, 3, PLAIN_RADIUS, [], _zones_without_dirt())
+	# La hierba ALTA sale del sorteo de la partida con el mismo mapa de zonas de siempre (sin
+	# eriales) y ya no cae en las planicies. Si una mancha cae sobre un erial, allí crece igual.
+	var tall := _spread(rng, tall_grass, GRASS_FIELDS, 2, GRASS_RADIUS, [plains], _zones_without_dirt())
+	# La MEDIA es solo paisaje y va con su propio sorteo. Donde coincide con la alta manda la alta, y
+	# en una planicie no se dibuja (MapLayout.grass_tier).
 	var mid := _spread(_terrain_rng(3), mid_grass, MID_FIELDS, 3, MID_RADIUS, [])
-	print("hierba: %d celdas altas, %d medias" % [tall, mid])
+	print("hierba: %d celdas altas, %d medias, %d de planicie" % [tall, mid, flat])
+
+
+## Marca en `into` las celdas de pradera transitables a `rad` celdas o menos de `c`.
+func _disc(into: Array, c: Vector2i, rad: int) -> int:
+	var cells := 0
+	for x in range(maxi(c.x - rad, 0), mini(c.x + rad + 1, mw)):
+		for y in range(maxi(c.y - rad, 0), mini(c.y + rad + 1, mh)):
+			if Vector2(x - c.x, y - c.y).length() > rad + 0.3:
+				continue
+			if MapBuilder.walkable(grid[x][y]) and int(zones[x][y]) != 1 and int(zones[x][y]) != 2 and not into[x][y]:
+				into[x][y] = true
+				cells += 1
+	return cells
 
 
 ## Copia de `zones` con los eriales otra vez como pradera.
@@ -947,7 +988,13 @@ func _scatter_cover() -> void:
 	var by_model := {}
 	# Los eriales no cuentan para elegir dónde va un peñasco: si contaran, cambiarían las celdas
 	# elegidas y con ellas el encaje de cada roca (tests/rocks_probe.gd).
-	var cells := MapLayout.pick_cover_cells(grid, _zones_without_dirt(), tall_grass, _spawn_cell(),
+	# Tampoco en la planicie de una salida: evitando la hierba alta, caían justo ahí y la zona de
+	# salida se iba a otro sitio con hierba (lo cazó tests/seed_map_probe.gd, 2026-09-18).
+	var no_rock := _empty_map()
+	for x in mw:
+		for y in mh:
+			no_rock[x][y] = bool(tall_grass[x][y]) or (not spawn_clear.is_empty() and bool(spawn_clear[x][y]))
+	var cells := MapLayout.pick_cover_cells(grid, _zones_without_dirt(), no_rock, _spawn_cell(),
 		COVER_ROCKS, COVER_GAP, rng)
 	for c in cells:
 		var name := "Rock_Medium_%d" % (1 + rng.randi() % 3)
@@ -1028,28 +1075,47 @@ func _scatter_grass(by_model: Dictionary) -> void:
 	var r := _terrain_rng(11)   # las matas no gastan del sorteo de la partida (ver _mark_dirt_fields)
 	var tufts := ["Grass_Common_Short", "Grass_Common_Tall", "Grass_Wispy_Short", "Grass_Wispy_Tall"]
 	var tall_pool := ["Grass_Common_Tall", "Grass_Wispy_Tall"]
+	var short_pool := ["Grass_Common_Short", "Grass_Wispy_Short"]
+	# Lo que mide cada modelo (de 1,07 a 1,87 m): las matas se escalan a los metros de su nivel
+	# (MapLayout.TUFT_H), no a ojo. Antes, a escala, hasta las bajas llegaban al pecho.
+	var model_h := {}
+	for name: String in tufts:
+		model_h[name] = _gltf_height(NATURE + name + ".gltf")
 	for x in mw:
 		for y in mh:
 			if not MapBuilder.walkable(grid[x][y]):
 				continue
-			# Tres alturas (petición del usuario, 2026-09-17): alta donde te escondes agachado (el
-			# triple de matas, solo variedades altas y a mayor escala: tiene que verse de lejos que
-			# ahí cabe alguien), MEDIA por la cintura —solo paisaje, no esconde— y matas bajas.
+			# Cuatro alturas (peticiones del usuario, 2026-09-17 y 2026-09-18): alta donde te
+			# escondes agachado (el triple de matas, solo variedades altas: tiene que verse de lejos
+			# que ahí cabe alguien), media por la cintura —solo paisaje, no esconde—, matas bajas y
+			# planicie casi rasa.
 			var tier := MapLayout.grass_tier(not tall_grass.is_empty() and tall_grass[x][y],
-				not mid_grass.is_empty() and mid_grass[x][y])
+				not mid_grass.is_empty() and mid_grass[x][y], not plains.is_empty() and plains[x][y])
 			# Fuera de la pradera (cueva, cementerio, erial) solo crece donde cayó una mancha alta.
 			if int(zones[x][y]) != 0 and tier != 2:
 				continue
-			var pool: Array = tall_pool if tier == 2 else tufts
-			var count: int = [(2 if touch else 4), (4 if touch else 7), (6 if touch else 12)][tier]
-			var lo: float = [0.45, 0.75, 1.0][tier]
-			var hi: float = [0.8, 1.05, 1.5][tier]
+			var pool: Array = tall_pool if tier == 2 else (tufts if tier == 1 else short_pool)
+			var count: int = {MapLayout.PLAIN: (1 if touch else 2), 0: (2 if touch else 4),
+				1: (4 if touch else 7), 2: (6 if touch else 12)}[tier]
 			for i in count:
+				var name: String = pool[r.randi() % pool.size()]
 				var xf := Transform3D.IDENTITY
 				xf = xf.rotated(Vector3.UP, r.randf() * TAU)
-				xf = xf.scaled(Vector3.ONE * r.randf_range(lo, hi))
+				xf = xf.scaled(Vector3.ONE * MapLayout.tuft_scale(float(model_h[name]), tier, r.randf()))
 				xf.origin = _cell_pos(x, y) + Vector3(r.randf_range(-1.4, 1.4), 0, r.randf_range(-1.4, 1.4))
-				by_model.get_or_add(pool[r.randi() % pool.size()], []).append(xf)
+				by_model.get_or_add(name, []).append(xf)
+
+
+## Alto de un modelo glTF (su caja envolvente), en metros. 1,0 si no carga.
+func _gltf_height(path: String) -> float:
+	var parts := _meshes_of(_load_gltf(path)) if _load_gltf(path) != null else []
+	if parts.is_empty():
+		return 1.0
+	var box := AABB()
+	for k in parts.size():
+		var b := (parts[k]["xform"] as Transform3D) * (parts[k]["mesh"] as Mesh).get_aabb()
+		box = b if k == 0 else box.merge(b)
+	return maxf(box.size.y, 0.01)
 
 
 ## Las 6 tumbas que el juego coloca en el cementerio: losa plana y lápida de pie. La lápida medía
@@ -1593,6 +1659,15 @@ static func new_seed() -> int:
 ## la misma, así que la primera oleada caía siempre en el mismo claro). Con la semilla de siempre
 ## —pruebas y sondas— sale siempre la misma, porque el sorteo es del `rng`.
 func _spawn_cell() -> Vector2i:
+	# Una vez por partida: antes cada llamada volvía a sortear, y la planicie de tu salida, el hueco
+	# sin peñascos y las estatuas de compañeros caían cada uno en una celda distinta.
+	if _start_cell.x >= 0:
+		return _start_cell
+	_start_cell = _pick_spawn_cell()
+	return _start_cell
+
+
+func _pick_spawn_cell() -> Vector2i:
 	var best := Vector2i(mw / 2, mh / 2)
 	var best_d := 1e9
 	var pool: Array[Vector2i] = []
@@ -2670,7 +2745,8 @@ func _slot(i: int) -> String:
 	if i == 2 and pf.ult_by_charge:
 		return "[%s %s]" % [name, "LISTA" if pf.ability_ready(2) else "carga " + pf.cooldown_text(2)]
 	if int(ab.get("chg", 0)) > 0:
-		return "[%s %d/%d]" % [name, _chg[i], int(ab["chg"])]
+		var left := pf.cooldown_left(i)       # lo que falta para la siguiente carga
+		return "[%s %d/%d%s]" % [name, _chg[i], int(ab["chg"]), " · %.0fs" % ceilf(left) if left > 0.0 else ""]
 	if i == 0 and pf.ammo_max > 0:
 		return "[%s %d/%d]" % [name, pf.ammo, pf.ammo_max]
 	if pf.cd[i] > 0.0:

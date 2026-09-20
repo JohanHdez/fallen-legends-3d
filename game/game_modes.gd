@@ -18,8 +18,11 @@ const MODES := {
 		"desc": "Batalla completa: cuatro leyendas por equipo, al mejor de 3 rondas, con el gas cerrando el mapa."},
 }
 const AREA_RADIUS := 4.5        # celdas alrededor del punto de salida de cada equipo
-const AREA_REACH := 0.55        # a qué fracción del radio del gas queda cada punto de salida
+# A qué fracción del radio del gas queda cada punto de salida: 0,55 dejaba a los equipos a 48 m; al
+# 0,8, con el mapa entero limpio, salen en los extremos, a 102 m (petición del usuario, 2026-09-18).
+const AREA_REACH := 0.8
 const GAS_MARGIN := 3.0         # celdas de holgura con el borde del gas inicial
+const MIN_CLEAR := 4            # celdas por equipo fuera de la hierba alta para salir en campo abierto
 
 
 static func is_pvp(mode: String) -> bool:
@@ -30,8 +33,17 @@ static func team_size(mode: String) -> int:
 	return int(MODES.get(mode, {}).get("team_size", 0))
 
 
-## Celda de campo con sus 8 vecinas transitables.
-static func _open_field(grid: Array, zones: Array, x: int, y: int) -> bool:
+## Nombre corto de los botones de modo: "Horda", "1VS1" … "4VS4" (petición del usuario, 2026-09-18:
+## "dice 2v2, debería decir 2VS2"). El id interno sigue siendo "2v2" (flags, datos, sondas).
+static func short_name(mode: String) -> String:
+	if mode == "horda":
+		return "Horda"
+	var n := team_size(mode)
+	return "%dVS%d" % [n, n] if n > 0 else mode
+
+
+## Celda de campo con sus 8 vecinas transitables y ninguna en un mapa de `avoid` (la hierba alta).
+static func _open_field(grid: Array, zones: Array, x: int, y: int, avoid: Array = []) -> bool:
 	var w := grid.size()
 	var h := (grid[0] as PackedInt32Array).size()
 	if x < 1 or y < 1 or x >= w - 1 or y >= h - 1 or zones[x][y] != 0:
@@ -40,13 +52,28 @@ static func _open_field(grid: Array, zones: Array, x: int, y: int) -> bool:
 		for dy in [-1, 0, 1]:
 			if not MapBuilder.walkable(grid[x + dx][y + dy]):
 				return false
+			for m in avoid:
+				if bool((m as Array)[x + dx][y + dy]):
+					return false
 	return true
 
 
 ## Las dos zonas de salida {1: celdas, 2: celdas}, opuestas respecto al centro y dentro del círculo
 ## inicial del gas (`radius` en celdas). Se prueba en 8 direcciones y se queda la que da más sitio
 ## al equipo que menos tiene. Cada lista va ordenada por cercanía a su punto de salida.
-static func spawn_areas(grid: Array, zones: Array, radius: float) -> Dictionary:
+## `avoid`: mapas [x][y] donde no se sale (la hierba alta: 2026-09-18, a petición del usuario, las
+## zonas caían del 40 al 91 % en ella y no se veía venir a nadie). Si fuera de ellos no quedan
+## MIN_CLEAR celdas por equipo, se sale como si no estuvieran.
+static func spawn_areas(grid: Array, zones: Array, radius: float, avoid: Array = []) -> Dictionary:
+	if not avoid.is_empty():
+		var clear := spawn_areas(grid, zones, radius)
+		var picked := _spawn_areas(grid, zones, radius, avoid)
+		var n := mini((picked.get(1, []) as Array).size(), (picked.get(2, []) as Array).size())
+		return picked if n >= MIN_CLEAR else clear
+	return _spawn_areas(grid, zones, radius, [])
+
+
+static func _spawn_areas(grid: Array, zones: Array, radius: float, avoid: Array) -> Dictionary:
 	var w := grid.size()
 	var h := (grid[0] as PackedInt32Array).size()
 	var center := Vector2(w * 0.5, h * 0.5)
@@ -66,7 +93,7 @@ static func spawn_areas(grid: Array, zones: Array, radius: float) -> Dictionary:
 					var c := Vector2(x, y)
 					if c.distance_to(anchor) > AREA_RADIUS or c.distance_to(center) > radius - GAS_MARGIN:
 						continue
-					if _open_field(grid, zones, x, y):
+					if _open_field(grid, zones, x, y, avoid):
 						cells.append(Vector2i(x, y))
 			cells.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
 				var da := Vector2(a).distance_to(anchor)

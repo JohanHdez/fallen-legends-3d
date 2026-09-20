@@ -292,6 +292,18 @@ func ammo_level() -> float:
 	return float(ammo) + 1.0 - clampf(ammo_t / maxf(ammo_reload, 0.01), 0.0, 1.0)
 
 
+## Cargas de una ranura para los arcos de su botón: las que se pueden lanzar más lo que lleva la
+## que está volviendo (1,5 = una lista y la segunda a medias). 0 si la ranura no va por cargas.
+func charge_level(i: int) -> float:
+	var maxc := int(abil(i).get("chg", 0))
+	if maxc <= 0:
+		return 0.0
+	if chg[i] >= maxc:
+		return float(maxc)
+	var cd_i := maxf(float(abil(i).get("cd", 1.0)), 0.01)
+	return float(chg[i]) + 1.0 - clampf(chg_t[i] / cd_i, 0.0, 1.0)
+
+
 ## Descuenta recargas y repone cargas y munición.
 func tick_cooldowns(delta: float) -> void:
 	if ammo_max > 0 and ammo < ammo_max:

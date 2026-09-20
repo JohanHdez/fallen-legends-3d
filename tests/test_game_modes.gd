@@ -20,6 +20,7 @@ func _init() -> void:
 	var grid := MapLayout.transpose(m["grid"])
 	var zones := MapLayout.transpose(m["zones"])
 	_test_modes()
+	_test_short_name()
 	var areas := _test_spawn_areas(grid, zones)
 	_test_legends()
 	_test_respawn(grid, zones, areas)
@@ -36,6 +37,16 @@ func _test_modes() -> void:
 		_check(GameModes.is_pvp(id) and GameModes.team_size(id) == n, "%s debe ser por equipos de %d" % [id, n])
 		_check(String(GameModes.MODES[id].get("name", "")) != "", "%s sin nombre" % id)
 	_check(not GameModes.is_pvp("inventado") and GameModes.team_size("inventado") == 0, "modo desconocido")
+
+
+## Lo que pone en los botones de modo (petición del usuario, 2026-09-18: "dice 2v2, debería decir
+## 2VS2 ... 4VS4"). El id interno sigue siendo "2v2".
+func _test_short_name() -> void:
+	_check(GameModes.short_name("horda") == "Horda", "la Horda se llama Horda: %s" % GameModes.short_name("horda"))
+	for n in range(1, 5):
+		var id := "%dv%d" % [n, n]
+		_check(GameModes.short_name(id) == "%dVS%d" % [n, n], "%s se escribe %dVS%d: %s" % [id, n, n, GameModes.short_name(id)])
+	_check(GameModes.short_name("inventado") == "inventado", "un modo desconocido se deja como está")
 
 
 func _test_spawn_areas(grid: Array, zones: Array) -> Dictionary:
@@ -64,8 +75,8 @@ func _test_spawn_areas(grid: Array, zones: Array) -> Dictionary:
 	_check(Vector2(areas[1][0]).distance_to(Vector2(areas[2][0])) >= 15.0, "zonas de salida demasiado cerca")
 	# Determinista.
 	_check(GameModes.spawn_areas(grid, zones, radius) == areas, "spawn_areas no es determinista")
-	# Por equipos el área limpia arranca al 65 % (TeamMode.PVP_ZONE_SCALE): sigue habiendo sitio para
-	# cuatro por equipo, dentro de ese círculo, y más cerca que en el mapa entero.
+	# Por equipos el área limpia arranca a TeamMode.PVP_ZONE_SCALE del mapa: tiene que haber sitio para
+	# cuatro por equipo dentro de ese círculo.
 	var small := radius * TeamMode.PVP_ZONE_SCALE
 	var near := GameModes.spawn_areas(grid, zones, small)
 	for team in [1, 2]:
@@ -73,10 +84,50 @@ func _test_spawn_areas(grid: Array, zones: Array) -> Dictionary:
 		_check(cells.size() >= 8, "área limpia pequeña: zona de salida %d con solo %d celdas" % [team, cells.size()])
 		for c: Vector2i in cells:
 			_check(Vector2(c).distance_to(center) <= small - 3.0, "área limpia pequeña: %s fuera del gas inicial" % c)
+	# Equipos en extremos (petición del usuario, 2026-09-18: "no hagas los equipos tan cerca, hazlos en
+	# extremos, para que las peleas se hagan entretenidas"): antes salían a 16 celdas (48 m).
 	if not near.get(1, []).is_empty() and not near.get(2, []).is_empty():
-		_check(Vector2(near[1][0]).distance_to(Vector2(near[2][0])) < Vector2(areas[1][0]).distance_to(Vector2(areas[2][0])),
-			"con el área pequeña las salidas deben quedar más cerca")
+		var apart := Vector2(near[1][0]).distance_to(Vector2(near[2][0]))
+		_check(apart >= 30.0, "por equipos las salidas quedan a %.0f celdas (%.0f m): tienen que ir a los extremos, 30 o más" % [apart, apart * 3.0])
+	_test_spawn_avoid(grid, zones, small)
 	return areas
+
+
+## Las zonas de salida evitan la hierba alta (petición del usuario, 2026-09-18: salían metidas en
+## ella del 40 al 91 %, sin ver venir a nadie). Si no queda sitio fuera de ella, sale igual.
+func _test_spawn_avoid(grid: Array, zones: Array, radius: float) -> void:
+	var w := grid.size()
+	var h := (grid[0] as PackedInt32Array).size()
+	var free := GameModes.spawn_areas(grid, zones, radius)
+	# Hierba alta justo encima de las dos zonas de siempre, y un poco por todas partes.
+	var tall: Array = []
+	for x in w:
+		var col := []
+		col.resize(h)
+		col.fill(false)
+		tall.append(col)
+	for team in [1, 2]:
+		for c: Vector2i in (free.get(team, []) as Array).slice(0, 12):
+			tall[c.x][c.y] = true
+	var areas := GameModes.spawn_areas(grid, zones, radius, [tall])
+	for team in [1, 2]:
+		var cells: Array = areas.get(team, [])
+		_check(cells.size() >= 4, "con hierba alta encima, la zona %d se queda con %d celdas" % [team, cells.size()])
+		for c: Vector2i in cells:
+			var clear := true
+			for dx in [-1, 0, 1]:
+				for dy in [-1, 0, 1]:
+					clear = clear and not bool(tall[c.x + dx][c.y + dy])
+			_check(clear, "celda de salida %s con hierba alta al lado" % c)
+	# Todo hierba alta: no hay dónde evitarla, así que salen donde siempre.
+	var all_tall: Array = []
+	for x in w:
+		var col := []
+		col.resize(h)
+		col.fill(true)
+		all_tall.append(col)
+	_check(GameModes.spawn_areas(grid, zones, radius, [all_tall]) == free,
+		"con todo el campo en hierba alta las zonas tienen que salir igual que sin ella")
 
 
 func _test_legends() -> void:

@@ -11,13 +11,18 @@ const TEAM_COLORS := {1: Color(0.45, 0.72, 1.0), 2: Color(1.0, 0.42, 0.36)}
 const TEAM_NAMES := {1: "Azul", 2: "Rojo"}
 # Ritmo de las peleas por equipos (petición del usuario, 2026-09-16, tras medir rondas de ~17 s con
 # ~7 s de pelea y ~10 s andando): vida ×3, definitiva por carga (Fighter.ULT_*), básicas que pueden
-# fallar (Combat.PVP_HOMING_*) y un mapa más corto: el área limpia arranca al 65 % del mapa, así
-# que las zonas de salida quedan más cerca, cuevas y esquinas son gas desde el principio, y el gas
-# espera 25 s y cierra ×1,5. El daño del gas va ×3 como la vida, para que siga apretando igual.
+# fallar (Combat.PVP_HOMING_*) y el gas que espera 25 s y cierra ×1,5. El daño del gas va ×3 como la
+# vida, para que siga apretando igual. El área limpia arrancaba al 65 % del mapa para que las salidas
+# quedaran cerca; el 2026-09-18 el usuario pidió lo contrario ("no hagas los equipos tan cerca,
+# hazlos en extremos, para que las peleas se hagan entretenidas"): arranca con el mapa entero y las
+# salidas van al 80 % de su radio (GameModes.AREA_REACH), a ~100 m de las 126 que mide el mapa.
 const PVP_HP_MULT := 3.0
-const PVP_ZONE_SCALE := 0.65
+const PVP_ZONE_SCALE := 1.0
 const ROUND_ZONE_WAIT := 25.0
-const ROUND_ZONE_FAST := 1.5
+# Con el mapa entero limpio, a ×1,5 el gas tardaba ~172 s en cerrarse y las rondas (150 s) se acababan
+# por tiempo sin que cayera nadie. A ×2,6 llega al final a los ~110 s, lo mismo que cuando arrancaba
+# al 65 %: salís lejos, pero el gas os junta al mismo ritmo de antes.
+const ROUND_ZONE_FAST := 2.6
 
 var main: Main
 var combat: Combat
@@ -37,6 +42,13 @@ func _init(p_main: Main) -> void:
 	combat = p_main.combat
 
 
+## Radio (en celdas) del círculo donde caen las zonas de salida: el área limpia inicial, que por
+## equipos arranca al PVP_ZONE_SCALE del mapa, o el mapa entero sin gas. Main lo usa ANTES de montar
+## el modo para dejar planicies en las zonas de salida.
+static func area_radius(mw: int, mh: int, zone_on: bool) -> float:
+	return minf(mw, mh) * 0.5 * (PVP_ZONE_SCALE if zone_on else 1.0)
+
+
 func setup(p_mode: String) -> void:
 	mode = p_mode
 	size = GameModes.team_size(mode)
@@ -49,8 +61,10 @@ func setup(p_mode: String) -> void:
 		if not main._args.has("zonefast"):
 			main._zone_fast = ROUND_ZONE_FAST
 		main.reset_zone()
-	var radius := main._zone_r0 / Main.CELL if main.zone_active() else minf(main.mw, main.mh) * 0.5
-	areas = GameModes.spawn_areas(main.grid, main.zones, radius)
+	# Fuera de la hierba alta, para ver venir al rival (petición del usuario, 2026-09-18). Main ya
+	# dejó una planicie en cada zona antes de repartir la hierba (con este mismo radio).
+	areas = GameModes.spawn_areas(main.grid, main.zones, area_radius(main.mw, main.mh, main.zone_active()),
+		[main.tall_grass])
 	var pf := main.pf
 	var legend := pf.legend
 	if main._args.has("legend"):
@@ -293,7 +307,10 @@ func _revive(f: Fighter, c: Vector2i) -> void:
 		f.rec[k] = 0.0
 	f.rec["bar_t"] = 0.0
 	f.since_damage = 0.0
-	f.ult_charge = 0.0            # la definitiva empieza vacía en cada ronda
+	# La definitiva NO se vacía: la carga que llevaras pasa a la ronda siguiente, y si ya estaba
+	# lista, empiezas con ella (petición del usuario, 2026-09-18; antes empezaba vacía en cada
+	# ronda). Solo empieza vacía al principio de la partida (_apply_pvp_rules). Las demás ranuras
+	# se rellenan enteras en reset_abilities, así que tampoco pierden nada.
 	combat.cure(f.rec)
 	f.reset_abilities()
 	f.windup = -1.0
