@@ -824,7 +824,14 @@ sigue en la sala.
 - Por defecto se conecta a `wss://fallen-legends-production.up.railway.app` (el dominio que tenía
   el 2D; sus APK se quedarán sin servidor cuando el servicio pase a ser este). Para uno local:
   `godot --path . -- --client=ws://127.0.0.1:7777`.
-- **En el móvil aún no conecta**: el APK sigue sin permiso de Internet hasta la fase 4.
+- **Desde el móvil**: el APK pide el permiso `INTERNET` desde el 2026-09-20 (a petición del usuario,
+  que quiso probar la sala desde el teléfono; antes estaba previsto para la fase 4). Es el único
+  permiso que pide.
+- **Despliegue del servidor**: `Dockerfile` + `railway.json` (copiados del 2D). Railway construye con
+  el Dockerfile y arranca `godot --headless --path /app -- --server --transport=ws`; el puerto sale
+  de su variable `PORT`. `.dockerignore` deja fuera `models/` (175 MB de glTF que el servidor de la
+  fase 1 no carga: con `--server`, `main.gd` sale antes de construir nada); **la fase 2 los volverá
+  a necesitar**.
 - Protocolo `NetService.PROTOCOL` = 100: un cliente con otra versión es rechazado con el motivo
   (el 2D va por 3, así que un cliente del 2D no entra aquí por error).
 - El identificador de dispositivo (`net/identity.gd`) **no se difunde nunca**: el servidor lo guarda

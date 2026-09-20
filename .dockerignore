@@ -1,0 +1,15 @@
+# Fuera de la imagen del servidor: lo que no necesita para correr.
+.git/
+.godot/
+export/
+docs/
+.superpowers/
+.claude/
+tools/
+# Los modelos (175 MB de glTF) NO los usa el servidor de la fase 1: con --server, main.gd sale antes
+# de construir mapa, leyendas ni nada (solo vive el autoload Net). Dejándolos fuera, la imagen mide
+# 519 MB medidos (Debian + Godot headless + 43 MB de proyecto) y la importación tarda 9 s; con ellos
+# se irían 175 MB más y minutos de importación en cada construcción.
+# OJO fase 2: cuando el servidor simule la partida de verdad, volverán a hacer falta (o habrá que
+# exportar un .pck del servidor). Está anotado en el diseño del juego en línea.
+models/

@@ -169,8 +169,9 @@ ventanas que abre una sesión de Claude Code están de fondo): referencia 40 esq
    primero sin cambiar comportamiento (trazas idénticas) y modifícalo después.
 3. **Seguridad y licencias**: repo **privado** (Bestiary de Quaternius va con la QAL); sonidos de
    p0ss **CC-BY-SA 3.0** (atribución visible); ningún secreto en el repo (keystore de release fuera,
-   variables `GODOT_ANDROID_KEYSTORE_RELEASE_*`); Android sin permisos de red
-   (hasta la fase 4 del juego en línea, por decisión del usuario del 2026-09-18); recursos con `load()`,
+   variables `GODOT_ANDROID_KEYSTORE_RELEASE_*`); el APK pide **solo** `INTERNET` (desde el
+   2026-09-20, a petición del usuario, para el juego en línea; `access_network_state` sigue en
+   false, y ningún permiso más entra sin que él lo pida); recursos con `load()`,
    nunca `Image.load_from_file`; `git push --force` denegado. Detalle: `docs/DESPLIEGUE.md`.
 4. **Sincronía con el 2D**: `map_builder.gd` y `dungeon_gen.gd` no se editan aquí; se traen con
    `tools/sync_2d.sh --copy`. Toda cifra de balance sale de `data/*.tres` del 2D; una desviación
