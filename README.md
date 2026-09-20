@@ -841,6 +841,9 @@ sigue en la sala.
   a necesitar**.
 - Protocolo `NetService.PROTOCOL` = 100: un cliente con otra versión es rechazado con el motivo
   (el 2D va por 3, así que un cliente del 2D no entra aquí por error).
+- **Entras con la leyenda que elegiste en el menú**: al registrarte, el servidor te da una libre sin
+  saber cuál querías, así que el cliente se la pide nada más entrar. Si ya la lleva un compañero, el
+  servidor lo rechaza y te quedas con la que te tocó (2026-09-20).
 - El identificador de dispositivo (`net/identity.gd`) **no se difunde nunca**: el servidor lo guarda
   para sí y a los demás solo les llega el apodo, numerado si se repite ("Kael 2").
 - Prueba: `tools/net_check.sh` (dentro de `tools/check.sh`) arranca un servidor y tres clientes sin
@@ -899,7 +902,7 @@ sigue en la sala.
 --identity=RUTA fichero de identidad propio (varias instancias en la misma máquina)
 --protocol=N    solo pruebas: fingir otra versión del protocolo
 --netprobe=X    sonda de red (tests/X.gd) bajo el autoload Net; lobby_probe admite --want-mode,
-                --want-legend, --want-team, --expect, --expect-kick, --hold y --secs
+                --want-legend, --want-team, --menu-legend, --expect, --expect-kick, --hold y --secs
 ```
 
 Partida de bots en headless, al mejor de 3, con traza cada 5 s:

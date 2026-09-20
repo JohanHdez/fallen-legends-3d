@@ -39,7 +39,13 @@ func _process(delta: float) -> void:
 		for n in get_tree().root.find_children("*", "Control", true, false):
 			if n is ModeMenu:
 				_pressed = true
-				(n as ModeMenu).play_online()
+				var menu := n as ModeMenu
+				# --menu-legend=N: como si la hubieras elegido en el menú antes de pulsar EN LÍNEA.
+				# El 2026-09-20 se entraba a la sala con otra: el servidor te daba una libre al
+				# registrarte y nadie le decía cuál querías.
+				if net.cmdline.has("menu-legend"):
+					menu.legend = int(net.cmdline["menu-legend"])
+				menu.play_online()
 				break
 
 
@@ -104,6 +110,13 @@ func _on_match_started(mode: String, seed_value: int, roster: Array) -> void:
 				me_seen = true
 				if net.cmdline.has("want-legend") and int(slot["legend"]) != int(net.cmdline["want-legend"]):
 					problems.append("salgo con otra leyenda (%d)" % int(slot["legend"]))
+				# Sin pedir nada, la leyenda es la que traías del menú (bug del 2026-09-20: entrabas
+				# a la sala con otra, porque el servidor te daba una libre y nadie le decía cuál).
+				if net.cmdline.has("menu-legend") and not net.cmdline.has("want-legend") \
+						and int(slot["legend"]) != int(net.cmdline["menu-legend"]):
+					problems.append("salgo con %s y en el menú elegí %s" % [
+						String(LegendData.LEGENDS[int(slot["legend"])]["name"]),
+						String(LegendData.LEGENDS[int(net.cmdline["menu-legend"])]["name"])])
 	if not me_seen:
 		problems.append("no estoy en el reparto")
 	# La sala enseña a todos los jugadores (petición del usuario: "donde puedes ver a tu equipo").

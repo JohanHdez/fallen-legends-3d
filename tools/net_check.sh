@@ -69,7 +69,9 @@ client Ana --want-mode=3v3 --want-legend=0 --want-team=1 --expect=2 &
 ana=$!
 # Ana llega primero, así que es la líder: Beto entra cuando ella ya está en la sala.
 for _ in $(seq 1 120); do grep -q "\[RED\] en la sala" "$tmp/Ana.log" 2>/dev/null && break; sleep 0.5; done
-client Beto --want-mode=3v3 --want-legend=3 --want-team=2 &
+# Beto no pide leyenda: entra con la que eligió en el menú (--menu-legend). Así se vigila que la
+# elección del menú llega a la sala (bug del 2026-09-20: entrabas con otra).
+client Beto --want-mode=3v3 --menu-legend=3 --want-team=2 &
 beto=$!
 wait "$ana"; ca=$?
 wait "$beto"; cb=$?

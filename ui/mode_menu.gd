@@ -230,6 +230,11 @@ func play_online() -> void:
 
 
 func _on_lobby_ready() -> void:
+	# Entras con la leyenda que habías elegido en el menú (petición del usuario, 2026-09-20: "había
+	# seleccionado el Rompemareas y al meterme a la sala me puso el Tormentero"). Al registrarte, el
+	# servidor te da una libre sin saber cuál querías; se la pides en cuanto estás dentro. Si un
+	# compañero ya la lleva, el servidor lo rechaza y te quedas con la que te tocó: la sala manda.
+	_net.request_legend(legend)
 	get_parent().add_child(Lobby.new())
 	queue_free()
 
