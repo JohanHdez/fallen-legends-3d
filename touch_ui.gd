@@ -24,21 +24,21 @@ func _draw() -> void:
 		return
 	var font := ThemeDB.fallback_font
 	# Joystick: base fija y pomo que sigue al dedo, igual que en el juego.
-	var jc: Vector2 = main.joy_center()
-	_round(TEX.underlay, jc, main.JOY_RADIUS, Color(1, 1, 1, 0.85))
-	var knob: Vector2 = jc + main._joy_vec * main.JOY_RADIUS
-	# Al borde se CORRE (main.JOY_RUN): el aro amarillo es lo único que lo dice, porque en el móvil no
-	# hay tecla Mayúsculas (2026-09-18).
-	var running: bool = main._joy_vec.length() >= main.JOY_RUN
+	var jc: Vector2 = main.input.joy_center()
+	_round(TEX.underlay, jc, main.input.JOY_RADIUS, Color(1, 1, 1, 0.85))
+	var knob: Vector2 = jc + main.input._joy_vec * main.input.JOY_RADIUS
+	# Al borde se CORRE (main.input.JOY_RUN): el aro amarillo es lo único que lo dice, porque en el
+	# móvil no hay tecla Mayúsculas (2026-09-18).
+	var running: bool = main.input._joy_vec.length() >= main.input.JOY_RUN
 	if running:
-		draw_arc(jc, main.JOY_RADIUS - 2.0, 0.0, TAU, 48, Color(1.0, 0.85, 0.35, 0.85), 4.0, true)
-	_round(TEX.move, knob, main.KNOB_RADIUS * (1.3 if running else 1.15),
-		Color(1.0, 0.92, 0.6) if running else Color(1, 1, 1, 1.0 if main._joy_idx >= 0 else 0.85))
+		draw_arc(jc, main.input.JOY_RADIUS - 2.0, 0.0, TAU, 48, Color(1.0, 0.85, 0.35, 0.85), 4.0, true)
+	_round(TEX.move, knob, main.input.KNOB_RADIUS * (1.3 if running else 1.15),
+		Color(1.0, 0.92, 0.6) if running else Color(1, 1, 1, 1.0 if main.input._joy_idx >= 0 else 0.85))
 
-	for b in main.button_rects():
-		if int(b["idx"]) == main.CROUCH_BTN:
+	for b in main.input.button_rects():
+		if int(b["idx"]) == main.input.CROUCH_BTN:
 			_crouch(b, font)
-		elif int(b["idx"]) == main.ORDERS_BTN:
+		elif int(b["idx"]) == main.input.ORDERS_BTN:
 			_orders(b, font)
 		else:
 			_ability(b, font)
@@ -47,7 +47,7 @@ func _draw() -> void:
 func _ability(b: Dictionary, font: Font) -> void:
 	var i: int = b["idx"]
 	var c: Vector2 = b["c"]
-	var pressed: bool = main._aim_btn == i
+	var pressed: bool = main.input._aim_btn == i
 	var r: float = b["r"] * (1.06 if pressed else 1.0)
 	var ready: bool = main._ability_ready(i)
 	var icon: Texture2D = TEX.attack
@@ -83,9 +83,9 @@ func _ability(b: Dictionary, font: Font) -> void:
 		_ammo_arcs(c, r + 7.0, main.pf.ammo_max, main.pf.ammo_level())
 
 	# Apuntado a mano: anillo de alcance y el icono desplazado hacia donde caerá.
-	if pressed and main._aim_drag.length() >= main.AIM_DEAD:
-		draw_arc(c, main.AIM_RADIUS, 0.0, TAU, 64, Color(1, 1, 1, 0.45), 2.0)
-		_round(icon, c + main._aim_drag.limit_length(main.AIM_RADIUS), r * 0.5, Color(1, 1, 1, 0.9))
+	if pressed and main.input._aim_drag.length() >= main.input.AIM_DEAD:
+		draw_arc(c, main.input.AIM_RADIUS, 0.0, TAU, 64, Color(1, 1, 1, 0.45), 2.0)
+		_round(icon, c + main.input._aim_drag.limit_length(main.input.AIM_RADIUS), r * 0.5, Color(1, 1, 1, 0.9))
 
 	var sub: String = b["name"]
 	var ss := font.get_string_size(sub, HORIZONTAL_ALIGNMENT_CENTER, -1, 13)
@@ -101,7 +101,7 @@ func _ability(b: Dictionary, font: Font) -> void:
 func _orders(b: Dictionary, font: Font) -> void:
 	var c: Vector2 = b["c"]
 	var r: float = b["r"]
-	var pressed: bool = main._aim_btn == main.ORDERS_BTN
+	var pressed: bool = main.input._aim_btn == main.input.ORDERS_BTN
 	var order: String = main.pf.minion_order
 	draw_circle(c, r * 0.92, Color(0.18, 0.26, 0.2, 0.85) if order != "ambush" else Color(0.3, 0.22, 0.12, 0.9))
 	_round(TEX.underlay, c, r * (1.06 if pressed else 1.0), Color(0.8, 1.2, 0.85, 0.95))
@@ -109,9 +109,9 @@ func _orders(b: Dictionary, font: Font) -> void:
 	var sz := font.get_string_size(icon, HORIZONTAL_ALIGNMENT_LEFT, -1, 28)
 	draw_string_outline(font, c + Vector2(-sz.x * 0.5, 10.0), icon, HORIZONTAL_ALIGNMENT_LEFT, -1, 28, 5, Color(0, 0, 0, 0.9))
 	draw_string(font, c + Vector2(-sz.x * 0.5, 10.0), icon, HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(0.85, 1.0, 0.8))
-	if pressed and main._aim_drag.length() >= main.AIM_DEAD:
-		draw_arc(c, main.AIM_RADIUS, 0.0, TAU, 64, Color(0.8, 1.0, 0.8, 0.45), 2.0)
-		draw_circle(c + main._aim_drag.limit_length(main.AIM_RADIUS), 10.0, Color(0.8, 1.0, 0.8, 0.8))
+	if pressed and main.input._aim_drag.length() >= main.input.AIM_DEAD:
+		draw_arc(c, main.input.AIM_RADIUS, 0.0, TAU, 64, Color(0.8, 1.0, 0.8, 0.45), 2.0)
+		draw_circle(c + main.input._aim_drag.limit_length(main.input.AIM_RADIUS), 10.0, Color(0.8, 1.0, 0.8, 0.8))
 	var sub := "Esqueletos: %s" % String(b["name"])
 	var ss := font.get_string_size(sub, HORIZONTAL_ALIGNMENT_CENTER, -1, 13)
 	var ty: float = c.y + r + 15.0
@@ -123,7 +123,7 @@ func _orders(b: Dictionary, font: Font) -> void:
 func _crouch(b: Dictionary, font: Font) -> void:
 	var c: Vector2 = b["c"]
 	var r: float = b["r"]
-	var on: bool = main._touch_crouch
+	var on: bool = main.input._touch_crouch
 	# Con un compañero derribado a tus pies, el botón se pone VERDE y avisa de que sirve para
 	# levantarlo (petición del usuario, 2026-09-18: no encontraba cómo reanimar).
 	var lift: bool = main.can_revive_now()

@@ -119,29 +119,8 @@ const WEAPON_POS := Vector3(0.0, 0.02, 0.0)
 const WEAPON_ROT := Vector3(0.0, 0.0, 0.0)
 
 
-# --- táctil ---
-# Las mismas que scripts/touch_controls.gd del juego 2D, para que el tacto sea idéntico.
-const JOY_RADIUS := 95.0
-const JOY_RUN := 0.92               # joystick al borde = correr (en el móvil no hay tecla Mayúsculas)
-const JOY_GRAB := 1.7        # el joystick responde hasta este múltiplo de su radio
-const KNOB_RADIUS := 42.0
-const DEAD_ZONE := 0.18
-const ABILITY_SIDE := 92.0
-const MAIN_SIDE := 120.0
-# Botón de agacharse (petición del usuario: en el móvil no había forma). Conmuta con un toque:
-# mantenerlo mientras mueves y atacas pediría tres dedos. Va arriba a la derecha del joystick, fuera
-# de la zona que lo agarra (JOY_RADIUS × JOY_GRAB).
-const CROUCH_BTN := 3
-const CROUCH_RADIUS := 36.0
-const CROUCH_OFFSET := Vector2(160.0, -135.0)
-# Botón de órdenes del Rey liche (sale con esqueletos vivos): tocar alterna Atacar/Reagrupar y
-# arrastrar coloca la Emboscada. En teclado, F; mantenida más de ORDERS_TAP, apunta la emboscada.
-const ORDERS_BTN := 4
-const ORDERS_RADIUS := 38.0
-const ORDERS_OFFSET := Vector2(-190.0, -130.0)   # desde la básica
-const ORDERS_TAP := 0.3
-const AIM_DEAD := 18.0       # px de arrastre a partir de los cuales se apunta a mano
-const AIM_RADIUS := 110.0    # px de arrastre que equivalen al alcance máximo
+# Constantes y estado del táctil, el teclado, el ratón y el apuntado: game/player_input.gd
+# (2026-09-20, fase 0 del juego en línea: el servidor sin pantalla no tiene entrada).
 # Datos de leyendas y habilidades: data/legend_data.gd. Alias para no tocar cada uso.
 const NECK := LegendData.NECK
 const HEAD_M := LegendData.HEAD_M
@@ -271,12 +250,10 @@ var _zone_veil: ColorRect = null
 var _zone_veil_a := 0.0
 var _zone_wait := ZONE_WAIT       # --zonewait=N lo acorta para probar
 var _zone_fast := 1.0             # --zonefast=N acelera el cierre para probar
-var _touch_crouch := false        # el botón de agacharse en táctil
 var _brasas_n := -1.0             # último valor de noche aplicado a las brasas
 var _cycle := DAY_CYCLE
 var _aim_ring: MeshInstance3D = null
 var _aim_dot: MeshInstance3D = null
-var _preview := -1                 # qué habilidad se está apuntando (-1 ninguna)
 var _orders_hold := -1.0           # F mantenida para las órdenes del Rey liche: segundos (-1 = suelta)
 
 var touch := false
@@ -285,13 +262,7 @@ var minimap: Minimap = null
 var show_fps := false             # contador de FPS de la esquina (se enciende desde la pausa)
 var _fps_label: Label = null
 var _fps_t := 0.0
-var _joy_idx := -1
-var _joy_origin := Vector2.ZERO
-var _joy_vec := Vector2.ZERO
-var _look_idx := -1
-var _aim_btn := -1
-var _aim_drag := Vector2.ZERO
-var _aim_idx := -1
+var input: PlayerInput = null     # teclado, ratón, táctil y apuntado: game/player_input.gd
 
 
 func _ready() -> void:
@@ -301,6 +272,9 @@ func _ready() -> void:
 	if _args.has("server"):
 		set_process(false)
 		set_physics_process(false)
+		# `_input`/`_unhandled_input` ya no los tiene Main (game/player_input.gd, 2026-09-20): estas
+		# dos líneas no apagan nada propio, pero se dejan porque tampoco molestan y `input` (el
+		# PlayerInput) nunca se crea con --server, así que no hay entrada que procesar de todos modos.
 		set_process_input(false)
 		set_process_unhandled_input(false)
 		return
@@ -329,7 +303,11 @@ func _ready() -> void:
 		rng.seed = int(_args["seed"])
 	elif Engine.has_meta("fl_seed"):
 		rng.seed = int(Engine.get_meta("fl_seed"))
-	vfx = Vfx.new(self, rng, touch)
+	# El dibujo NO comparte el sorteo del combate (fase 0 del juego en línea): pintar o no pintar no
+	# puede cambiar la partida. Pero sí lleva la MISMA semilla ya resuelta, para que dos partidas
+	# iguales se pinten igual y para que `--seed=N` cambie también el dibujo (antes se saltaba el
+	# flag y los torneos de balance pintaban todos idéntico: revisión del 2026-09-20).
+	vfx = Vfx.new(self, touch, int(rng.seed))
 	combat = Combat.new(self, vfx)
 	var t0 := Time.get_ticks_msec()
 	var m: Dictionary = MapBuilder.horde_map(MAP_SEED)
@@ -375,12 +353,18 @@ func _ready() -> void:
 		horde_mode.setup(_horde_team_size())
 		horde = Horde.new(self)
 		horde.setup()
-	_build_aim()
+	# La entrada del jugador (teclado, ratón, táctil, apuntado): game/player_input.gd. Se crea aquí,
+	# antes de _build_aim (que main.gd llamaba SIEMPRE, incluso en el menú, así que input tiene que
+	# existir ya, no solo a partir de donde antes se llamaba _setup_touch).
+	input = PlayerInput.new()
+	input.main = self
+	add_child(input)
+	input._build_aim()
 	if _mode != "menu" and team_mode == null:
 		reset_abilities()
 	_setup_music()
 	if _mode != "menu":
-		_setup_touch()
+		input._setup_touch()
 		# Minimapa arriba a la derecha (petición del usuario), por debajo de la pausa.
 		var map_layer := CanvasLayer.new()
 		map_layer.layer = 14
@@ -1641,20 +1625,6 @@ func reset_abilities() -> void:
 	pf.reset_abilities()
 
 
-## Tu lanzamiento: intercambio con el señuelo si toca, y si no, al punto que marque la mira (ratón)
-## o al enemigo más cercano (toque sin arrastre).
-func _try_cast(i: int, at := Vector3.INF) -> void:
-	if combat.try_swap(pf, i):
-		return
-	if i == 0 and pf.ammo_max > 0 and pf.ammo <= 0 and team_mode != null:
-		team_mode.dry_fire()
-	if not pf.ability_ready(i):
-		return
-	if at == Vector3.INF:
-		at = _auto_aim(i) if touch else _aim_point(pf.ability_range(i))
-	combat.start_cast(pf, i, at)
-
-
 ## Semilla de una partida nueva, la que guardan el menú y la revancha en `fl_seed` (petición del
 ## usuario, 2026-09-18: que cada partida sea distinta). Del reloj, no de `randomize()`: el juego no
 ## sortea nunca por su cuenta (regla de determinismo de CLAUDE.md), y las pruebas y sondas, que no
@@ -1791,44 +1761,6 @@ func _play_music(boss: bool) -> void:
 
 # ---------------------------------------------------------------- táctil
 
-func _setup_touch() -> void:
-	if not touch:
-		return
-	var layer := CanvasLayer.new()
-	layer.layer = 20
-	add_child(layer)
-	touch_ui = Control.new()
-	touch_ui.set_script(load("res://touch_ui.gd"))
-	touch_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
-	touch_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	touch_ui.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR   # los SVG se reescalan suaves
-	touch_ui.main = self
-	layer.add_child(touch_ui)
-
-
-## Posición fija del joystick, igual que en el juego (no aparece donde tocas).
-func joy_center() -> Vector2:
-	return Vector2(190.0, get_viewport().get_visible_rect().size.y - 250.0)
-
-
-## Misma distribución que touch_controls._layout(): básica grande abajo a la derecha,
-## táctica a su izquierda y definitiva arriba. Más el botón de agacharse junto al joystick.
-func button_rects() -> Array:
-	var v := get_viewport().get_visible_rect().size
-	var main_c := Vector2(v.x - 100.0, v.y - 110.0)
-	return [
-		{"idx": 0, "c": main_c, "r": MAIN_SIDE / 2.0, "name": String(_abil(0)["n"])},
-		{"idx": 1, "c": main_c + Vector2(-170.0, 20.0), "r": ABILITY_SIDE / 2.0, "name": String(_abil(1)["n"])},
-		{"idx": 2, "c": main_c + Vector2(-60.0, -165.0), "r": ABILITY_SIDE / 2.0, "name": String(_abil(2)["n"])},
-		{"idx": CROUCH_BTN, "c": crouch_center(joy_center()), "r": CROUCH_RADIUS, "name": "Agacharse"},
-	] + ([{"idx": ORDERS_BTN, "c": main_c + ORDERS_OFFSET, "r": ORDERS_RADIUS,
-		"name": Minions.ORDER_NAMES[pf.minion_order]}] if _has_minions() else [])
-
-
-static func crouch_center(joy: Vector2) -> Vector2:
-	return joy + CROUCH_OFFSET
-
-
 ## ¿Tu leyenda tiene esqueletos a los que dar órdenes?
 func _has_minions() -> bool:
 	return pf != null and not combat.minions.of(pf).is_empty()
@@ -1844,169 +1776,7 @@ func _orders_release(ambush_at: Vector3) -> void:
 		combat.minions.set_order(pf, "ambush", ambush_at)
 
 
-## Dónde caería la emboscada que estás apuntando ahora (F mantenida o arrastrando el botón), o INF.
-func _ambush_aim() -> Vector3:
-	if not _has_minions():
-		return Vector3.INF
-	if _orders_hold >= ORDERS_TAP:
-		return Minions.ambush_point(pf.pos(), _aim_point(Minions.AMBUSH_RANGE))
-	if _aim_btn == ORDERS_BTN and _aim_drag.length() > AIM_DEAD:
-		return Minions.ambush_point(pf.pos(), _drag_point(Minions.AMBUSH_RANGE))
-	return Vector3.INF
-
-
-## Punto del suelo que marca un arrastre táctil de `_aim_drag`, a `rng_m` como mucho.
-func _drag_point(rng_m: float) -> Vector3:
-	var f := clampf(_aim_drag.length() / AIM_RADIUS, 0.0, 1.0)
-	var basis := cam.global_transform.basis
-	var fwd := Vector3(-basis.z.x, 0, -basis.z.z).normalized()
-	var right := Vector3(basis.x.x, 0, basis.x.z).normalized()
-	var dir := (right * _aim_drag.x - fwd * _aim_drag.y).normalized()
-	var at := player.global_position + dir * (rng_m * f)
-	at.y = 0.0
-	return at
-
-
-## Segundos que faltan, para el número del centro del botón.
-func button_center(idx: int) -> Vector2:
-	for b in button_rects():
-		if b["idx"] == idx:
-			return b["c"]
-	return Vector2.ZERO
-
-
-func _button_at(p: Vector2) -> int:
-	for b in button_rects():
-		if p.distance_to(b["c"]) <= b["r"] + 12.0:
-			return b["idx"]
-	return -1
-
-
-func _input(e: InputEvent) -> void:
-	if not touch or touch_ui == null:
-		return
-	if _frozen():
-		return
-	if e is InputEventScreenTouch:
-		var t := e as InputEventScreenTouch
-		if t.pressed:
-			var b := _button_at(t.position)
-			if b == CROUCH_BTN:
-				_touch_crouch = not _touch_crouch
-			elif b >= 0:
-				_aim_btn = b
-				_aim_idx = t.index          # el dedo que manda esta habilidad
-				_aim_drag = Vector2.ZERO
-				_preview = b if b != ORDERS_BTN else -1
-			elif t.position.distance_to(joy_center()) <= JOY_RADIUS * JOY_GRAB:
-				_joy_idx = t.index
-				_joy_origin = joy_center()
-				_joy_vec = _joy_from(t.position)
-			else:
-				_look_idx = t.index
-		else:
-			# Cada dedo suelta LO SUYO: antes cualquier dedo levantado disparaba la habilidad,
-			# así que soltar el joystick la lanzaba y soltar el botón ya no hacía nada.
-			if t.index == _aim_idx:
-				_aim_idx = -1
-				_release_aim()
-			if t.index == _joy_idx:
-				_joy_idx = -1
-				_joy_vec = Vector2.ZERO
-			if t.index == _look_idx:
-				_look_idx = -1
-		touch_ui.queue_redraw()
-	elif e is InputEventScreenDrag:
-		var d := e as InputEventScreenDrag
-		if d.index == _aim_idx and _aim_btn >= 0:
-			_aim_drag = d.position - button_center(_aim_btn)
-		elif d.index == _joy_idx:
-			_joy_vec = _joy_from(d.position)
-		elif d.index == _look_idx:
-			_yaw -= d.relative.x * 0.006
-			_pitch = clampf(_pitch - d.relative.y * 0.005, -1.35, 0.35)
-		touch_ui.queue_redraw()
-
-
-## Vector del joystick a partir de dónde está el dedo, con la zona muerta del juego.
-func _joy_from(p: Vector2) -> Vector2:
-	var v := (p - joy_center()) / JOY_RADIUS
-	if v.length() < DEAD_ZONE:
-		return Vector2.ZERO
-	return v.limit_length(1.0)
-
-
-## Soltar el botón: si apenas se arrastró es un toque (apuntado automático); si se arrastró,
-## la dirección y la distancia del arrastre mandan, como el apuntado táctil del juego.
-func _release_aim() -> void:
-	var idx := _aim_btn
-	_aim_btn = -1
-	_preview = -1
-	if idx < 0:
-		return
-	if idx == ORDERS_BTN:
-		_orders_release(Vector3.INF if _aim_drag.length() <= AIM_DEAD else _drag_point(Minions.AMBUSH_RANGE))
-		return
-	if _aim_drag.length() <= AIM_DEAD:
-		_try_cast(idx)
-		return
-	_try_cast(idx, _drag_point(_ability_range(idx)))
-
-
 # ---------------------------------------------------------------- poderes
-
-func _build_aim() -> void:
-	_aim_ring = vfx.ring(5.0, SPARK, 0.55)
-	_aim_ring.visible = false
-	add_child(_aim_ring)
-	_aim_dot = vfx.ring(0.22, SPARK, 0.9)
-	add_child(_aim_dot)
-
-
-## Dónde apunta la mira: rayo desde el centro de la pantalla al plano del suelo, recortado
-## al alcance de la habilidad. En 3ª persona esto sustituye al ratón sobre el mapa isométrico.
-func _aim_point(max_range: float) -> Vector3:
-	var origin := cam.global_position
-	var dir := -cam.global_transform.basis.z
-	var p := player.global_position
-	if dir.y < -0.01:
-		p = origin + dir * (-origin.y / dir.y)
-	else:
-		p = player.global_position + Vector3(dir.x, 0, dir.z).normalized() * max_range
-	p.y = 0.0
-	var from := player.global_position
-	from.y = 0.0
-	var off := p - from
-	if off.length() > max_range:
-		p = from + off.normalized() * max_range
-	return p
-
-
-## El punto que marcaría el arrastre actual, para pintar el anillo antes de soltar.
-func _aim_point_touch(idx: int) -> Vector3:
-	if _aim_drag.length() <= AIM_DEAD:
-		return _auto_aim(idx)
-	var f := clampf(_aim_drag.length() / AIM_RADIUS, 0.0, 1.0)
-	var basis := cam.global_transform.basis
-	var fwd := Vector3(-basis.z.x, 0, -basis.z.z).normalized()
-	var right := Vector3(basis.x.x, 0, basis.x.z).normalized()
-	var dir := (right * _aim_drag.x - fwd * _aim_drag.y).normalized()
-	var at := player.global_position + dir * (_ability_range(idx) * f)
-	at.y = 0.0
-	return at
-
-
-## Toque sin arrastre: al enemigo más cercano dentro del alcance; si no, al frente.
-func _auto_aim(i: int) -> Vector3:
-	var rng_m := _ability_range(i)
-	var near := combat.foes_in(pf.team, player.global_position, rng_m, 1, true)
-	if not near.is_empty():
-		var p: Vector3 = near[0]["node"].global_position
-		p.y = 0.0
-		return p
-	var f := Vector3(sin(player_model.rotation.y), 0, cos(player_model.rotation.y))
-	return player.global_position + f * rng_m * 0.7
-
 
 ## Una criatura ha muerto (lo llama Combat.hurt): la Horda lleva la cuenta.
 func _kill_zombie(z: Dictionary, by: Fighter = null) -> void:
@@ -2141,24 +1911,6 @@ func _set_bar(bar: Node3D, frac: float, scale := 1.0) -> void:
 	var w := BAR_W * scale
 	fill.scale.x = maxf(f, 0.001)
 	fill.position.x = -w * 0.5 + w * f * 0.5
-
-
-## Solo para pruebas headless: lanza lo que esté listo hacia el enemigo más cercano.
-func _auto_cast() -> void:
-	if pf.dash_left > 0.0:
-		return              # durante la embestida no se lanza nada (si no, pisa su animación)
-	var near := combat.foes_in(pf.team, player.global_position, 30.0, 1, true)
-	if near.is_empty() or player_model == null:
-		return
-	var to: Vector3 = near[0]["node"].global_position - player.global_position
-	to.y = 0.0
-	if to.length() > 0.1:
-		player_model.rotation.y = atan2(to.x, to.z)
-	for idx in [2, 1, 0]:
-		if _ability_ready(idx):
-			var at := player.global_position + to.normalized() * minf(to.length(), _ability_range(idx))
-			_try_cast(idx, at)
-			return
 
 
 ## Alfa de las dos capas de la barra. El fondo va más tenue que el relleno, como al crearla.
@@ -2481,73 +2233,6 @@ func _apply_cam_mode() -> void:
 		spring.collision_mask = 0      # vista alta: flota, si chocara se metería entre las copas
 
 
-func _unhandled_input(e: InputEvent) -> void:
-	if _mode == "menu" or player == null:
-		return
-	if _frozen():
-		return
-	if e is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		var mm := e as InputEventMouseMotion
-		_yaw -= mm.relative.x * 0.005
-		_pitch = clampf(_pitch - mm.relative.y * 0.004, -1.35, 0.35)
-	elif e is InputEventMouseButton:
-		var mb := e as InputEventMouseButton
-		if mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
-			spring.spring_length = maxf(2.0, spring.spring_length - 0.8)
-		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
-			spring.spring_length = minf(30.0, spring.spring_length + 0.8)
-		elif mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed and not touch:
-			_try_cast(0)
-		elif mb.button_index == MOUSE_BUTTON_RIGHT and not touch:
-			# mantener = ver el radio, soltar = colocar (como el apuntado táctil del juego)
-			if mb.pressed:
-				_preview = 1
-			else:
-				_preview = -1
-				_try_cast(1)
-	elif e is InputEventKey and not (e as InputEventKey).echo:
-		var k := e as InputEventKey
-		if k.pressed:
-			match k.physical_keycode:
-				KEY_ESCAPE:
-					Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED else Input.MOUSE_MODE_CAPTURED
-				KEY_C:
-					_cam_mode = 1 - _cam_mode
-					_apply_cam_mode()
-				KEY_Q:
-					_try_cast(0)
-				KEY_E:
-					_preview = 1
-				KEY_R:
-					_preview = 2
-				KEY_F:
-					if _has_minions():
-						_orders_hold = 0.0
-				KEY_TAB:
-					if team_mode == null and _horde_team_size() == 1:   # con equipo, la de la partida
-						switch_legend(1)
-				KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7:
-					if team_mode == null and _horde_team_size() == 1:
-						switch_legend(k.physical_keycode - KEY_1 - _legend)
-				KEY_F10:
-					get_tree().quit()
-		else:
-			match k.physical_keycode:
-				KEY_E:
-					if _preview == 1:
-						_preview = -1
-						_try_cast(1)
-				KEY_R:
-					if _preview == 2:
-						_preview = -1
-						_try_cast(2)
-				KEY_F:
-					if _orders_hold >= 0.0:
-						var at := _ambush_aim() if _orders_hold >= ORDERS_TAP else Vector3.INF
-						_orders_hold = -1.0
-						_orders_release(at)
-
-
 ## Una vuelta de física: tu muerte y reaparición, el combate (leyendas y mundo), la horda, el gas
 ## y por último tu movimiento, que lee el teclado o el joystick y lo pasa a tu leyenda.
 func _physics_process(delta: float) -> void:
@@ -2580,7 +2265,7 @@ func _physics_process(delta: float) -> void:
 	if frozen or _autoplay():
 		pass
 	elif touch:
-		wish = right * _joy_vec.x - fwd * _joy_vec.y
+		wish = right * input._joy_vec.x - fwd * input._joy_vec.y
 	elif Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if Input.is_physical_key_pressed(KEY_W): wish += fwd
 		if Input.is_physical_key_pressed(KEY_S): wish -= fwd
@@ -2588,11 +2273,11 @@ func _physics_process(delta: float) -> void:
 		if Input.is_physical_key_pressed(KEY_A): wish -= right
 	# Agacharse: Ctrl mantenido. Frena mucho, pero dentro de una mancha de hierba alta te borra
 	# del mapa para las criaturas.
-	pf.crouch = Input.is_physical_key_pressed(KEY_CTRL) or _touch_crouch
+	pf.crouch = Input.is_physical_key_pressed(KEY_CTRL) or input._touch_crouch
 	# Correr: Mayúsculas, y en el móvil llevando el joystick al borde (JOY_RUN). Hasta el 2026-09-18
 	# en táctil NO se podía correr, y ese mismo día los bots empezaron a correr al perseguir: el móvil
 	# se quedaba sin la única forma de alcanzar a nadie y sin la de escapar.
-	pf.run = Input.is_physical_key_pressed(KEY_SHIFT) or (touch and _joy_vec.length() >= JOY_RUN)
+	pf.run = Input.is_physical_key_pressed(KEY_SHIFT) or (touch and input._joy_vec.length() >= input.JOY_RUN)
 	if not _autoplay():
 		pf.wish = wish
 		combat.move_fighter(pf, delta)
@@ -2620,21 +2305,21 @@ func _physics_process(delta: float) -> void:
 ## Estado de todas las leyendas, luz, barras, mira y después todo lo que hay en el mundo.
 func _tick_powers(delta: float) -> void:
 	# Mantener la básica carga el mandoble (solo la leyenda que lo tiene).
-	pf.holding_basic = (_aim_btn == 0) or (not touch and Input.is_physical_key_pressed(KEY_Q))
+	pf.holding_basic = (input._aim_btn == 0) or (not touch and Input.is_physical_key_pressed(KEY_Q))
 	for f: Fighter in combat.fighters:
 		combat.tick_fighter(f, delta)
 	_tick_daylight(delta)
 	combat.tick_bars(delta)
 
-	var prev_r := _ability_range(_preview) if _preview >= 0 else 6.0
-	var aim := _aim_point(prev_r)
-	if touch and _aim_btn >= 0:
-		aim = _aim_point_touch(_preview)
+	var prev_r := _ability_range(input._preview) if input._preview >= 0 else 6.0
+	var aim := input._aim_point(prev_r)
+	if touch and input._aim_btn >= 0:
+		aim = input._aim_point_touch(input._preview)
 	_aim_dot.position = aim + Vector3(0, 0.05, 0)
-	_aim_ring.visible = _preview >= 1
+	_aim_ring.visible = input._preview >= 1
 	if _orders_hold >= 0.0:
 		_orders_hold += delta
-	var ambush := _ambush_aim()
+	var ambush := input._ambush_aim()
 	if ambush != Vector3.INF:
 		# Apuntando la emboscada: el aro de 3 m donde se esconderán.
 		_aim_ring.visible = true
@@ -2642,15 +2327,15 @@ func _tick_powers(delta: float) -> void:
 		var at_ring := _aim_ring.mesh as TorusMesh
 		at_ring.outer_radius = Minions.AMBUSH_RADIUS
 		at_ring.inner_radius = Minions.AMBUSH_RADIUS - 0.12
-	if _preview >= 1:
+	if input._preview >= 1:
 		_aim_ring.position = aim + Vector3(0, 0.05, 0)
-		var r := _ability_radius(_preview)
+		var r := _ability_radius(input._preview)
 		var t := _aim_ring.mesh as TorusMesh
 		t.outer_radius = r
 		t.inner_radius = maxf(0.05, r - 0.12)
 
 	if _args.has("autocast"):
-		_auto_cast()
+		input._auto_cast()
 	if team_mode != null:
 		team_mode.tick_brains(delta)
 	elif horde_mode != null:

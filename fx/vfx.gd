@@ -17,17 +17,27 @@ const ORB_STEP := 0.09                # cada cuánto se rehacen los brazos (s)
 const NOX_R := 0.42                   # radio de la esfera de la Baliza Nox, apoyada en el suelo
 
 var world: Node3D                     # donde cuelgan los efectos (la raíz de la escena)
-var rng: RandomNumberGenerator        # el de la partida: el reparto de rayos y púas sale de él
 var touch := false                    # en móvil, la mitad de partículas en las nubes
 var sparks: Array = []                # efectos temporales: {node, life}
 var _cache := {}
 var _bubble_sh: Shader = null         # uno para todas: compilarlo por burbuja cuesta y se filtra
+## Generador propio (2026-09-20, fase 0 del juego en línea): antes compartía el `rng` del combate, así
+## que pintar un rayo movía el sorteo de la partida y el servidor —que no pinta— habría jugado otra
+## partida distinta a la del cliente. Se siembra con la semilla de la partida: dos partidas iguales
+## siguen pintando igual.
+var _rng := RandomNumberGenerator.new()
 
 
-func _init(p_world: Node3D, p_rng: RandomNumberGenerator, p_touch: bool) -> void:
+## `p_seed` es la semilla YA RESUELTA de la partida (main.gd la saca de --seed, del menú o de
+## MAP_SEED): así el dibujo cambia con la semilla, como el resto de la partida. Antes se leía aquí
+## `fl_seed` por separado y los torneos de balance con seis semillas pintaban todos igual
+## (revisión de la tarea 2, 2026-09-20).
+func _init(p_world: Node3D, p_touch: bool, p_seed := 1234) -> void:
 	world = p_world
-	rng = p_rng
 	touch = p_touch
+	# +7919 (un primo cualquiera): para que este generador no ande en fase con el `rng` del combate
+	# aunque partan de la misma semilla de partida.
+	_rng.seed = p_seed + 7919
 
 
 ## Libera los efectos temporales que ya han cumplido.
@@ -88,6 +98,33 @@ func burst(tex: String, pos: Vector3, color: Color, amount := 16, life := 0.6,
 
 
 ## Emisor continuo colgado de un nodo: la nube de gas, el aura de la mejora.
+## Los bultos de esporas de un infectado: cuatro esferas alrededor del cuerpo, a la medida del bicho
+## (en un duende de 0,93 m, los del esqueleto le flotaban por encima de la cabeza). Vivían dentro de
+## `Combat.infect`, construidos a mano y sorteando con el `rng` DEL COMBATE (lo cazó la revisión de
+## la tarea 2, 2026-09-20): como no pasaban por `Vfx`, ningún grep de efectos los encontraba, y en la
+## fase 2 habrían hecho que el servidor —que no pinta— jugara una partida distinta a la del cliente.
+func spore_lumps(color: Color, scale_f: float) -> Node3D:
+	var lumps := Node3D.new()
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.emission_enabled = true
+	mat.emission = color * 0.6
+	for i in 4:
+		var sph := SphereMesh.new()
+		var r := _rng.randf_range(0.10, 0.20) * scale_f
+		sph.radius = r
+		sph.height = r * 2.0
+		sph.radial_segments = 6
+		sph.rings = 4
+		var mi := MeshInstance3D.new()
+		mi.mesh = sph
+		mi.material_override = mat
+		var a := TAU * i / 4.0 + _rng.randf()
+		mi.position = Vector3(cos(a) * 0.22 * scale_f, _rng.randf_range(0.5, 1.5) * scale_f, sin(a) * 0.22 * scale_f)
+		lumps.add_child(mi)
+	return lumps
+
+
 func emitter(parent: Node3D, tex: String, color: Color, radius: float,
 		amount := 40, life := 2.0, rise := 0.35, size := 2.0) -> CPUParticles3D:
 	var p := CPUParticles3D.new()
@@ -148,7 +185,7 @@ func spark(at: Vector3, col := Color(0.85, 0.92, 1.0)) -> void:
 	for i in segs + 1:
 		var t := float(i) / segs
 		var wob := (1.0 - absf(t - 0.5) * 1.6) * 0.55      # más quebrado por el centro
-		pts.append(at + Vector3(rng.randf_range(-wob, wob), top * (1.0 - t), rng.randf_range(-wob, wob)))
+		pts.append(at + Vector3(_rng.randf_range(-wob, wob), top * (1.0 - t), _rng.randf_range(-wob, wob)))
 	for i in segs:
 		var a: Vector3 = pts[i]
 		var b: Vector3 = pts[i + 1]
@@ -170,7 +207,8 @@ func spark(at: Vector3, col := Color(0.85, 0.92, 1.0)) -> void:
 ## Esfera ELÉCTRICA flotante de la Trampa eléctrica (petición del usuario, 2026-09-17; antes era un
 ## disco pequeño en el suelo que no se leía como trampa): un núcleo que late y flota, con brazos
 ## quebrados saltando alrededor como una bola de plasma. Los brazos se rehacen con senos del reloj y
-## NO con `rng`: dibujar no puede cambiar las trazas deterministas de la Horda.
+## NO con `_rng`: así el patrón en el instante `t` es siempre el mismo, sin depender de cuántas veces
+## se haya llamado antes (una función pura del reloj, no un sorteo con estado).
 func electric_orb(color: Color) -> Node3D:
 	var root := Node3D.new()
 	root.position = Vector3(0, ORB_H, 0)
@@ -271,7 +309,7 @@ func _plasma(arms: Node3D, k: float, live: bool) -> void:
 	for i in ORB_ARMS:
 		# Cada paso se encienden unos y se apagan otros: es lo que lo lee como electricidad y no como
 		# una estrella fija (petición del usuario, 2026-09-17). El sorteo es una función del reloj, no
-		# del `rng`, para no tocar las trazas deterministas.
+		# de `_rng`: da el mismo patrón para el mismo instante, sin gastar sorteos del generador.
 		var on: bool = fposmod(sin(k * 12.9898 + i * 78.233) * 43758.5453, 1.0) < ORB_ON
 		var a := TAU * i / ORB_ARMS + k * 0.7
 		var dir := Vector3(cos(a), sin(k * 1.3 + i * 2.1) * 0.6, sin(a)).normalized()
@@ -395,7 +433,7 @@ func zone_burst(st: Dictionary, at: Vector3, rad: float) -> void:
 		_:
 			for k in int(st.get("bolts", 0)):
 				var a := TAU * k / maxi(1, int(st["bolts"]))
-				spark(at + Vector3(cos(a), 0, sin(a)) * rad * 0.6 * rng.randf())
+				spark(at + Vector3(cos(a), 0, sin(a)) * rad * 0.6 * _rng.randf())
 
 
 ## Mata de púas: tres conos inclinados que salen del suelo. Antes era un disco plano de 70 cm
@@ -410,14 +448,14 @@ func spike_clump(rad: float) -> Node3D:
 		var c := CylinderMesh.new()
 		c.top_radius = 0.0
 		c.bottom_radius = 0.13 * grow
-		c.height = rng.randf_range(1.0, 1.5) * grow
+		c.height = _rng.randf_range(1.0, 1.5) * grow
 		c.radial_segments = 6
 		var mi := MeshInstance3D.new()
 		mi.mesh = c
 		mi.material_override = mat
-		var a := TAU * i / float(maxi(1, int(3 * grow))) + rng.randf() * 0.7
-		mi.position = Vector3(cos(a), 0, sin(a)) * rad * rng.randf_range(0.15, 0.75) + Vector3(0, c.height * 0.45, 0)
-		mi.rotation = Vector3(rng.randf_range(-0.25, 0.25), a, rng.randf_range(-0.25, 0.25))
+		var a := TAU * i / float(maxi(1, int(3 * grow))) + _rng.randf() * 0.7
+		mi.position = Vector3(cos(a), 0, sin(a)) * rad * _rng.randf_range(0.15, 0.75) + Vector3(0, c.height * 0.45, 0)
+		mi.rotation = Vector3(_rng.randf_range(-0.25, 0.25), a, _rng.randf_range(-0.25, 0.25))
 		root.add_child(mi)
 	# marca oscura en el suelo, aplastada como las zonas del juego
 	var mark := disc(rad, Color(0.25, 0.2, 0.12), 0.35)

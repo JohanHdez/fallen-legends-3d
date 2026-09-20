@@ -58,7 +58,7 @@ func _nearest_grass() -> Vector2i:
 func _physics_process(delta: float) -> void:
 	_t += delta
 	if _hide:
-		main._touch_crouch = true             # agachada todo el rato, sin moverse (nadie la maneja)
+		main.input._touch_crouch = true             # agachada todo el rato, sin moverse (nadie la maneja)
 	_window_t -= delta
 	if _window_t <= 0.0:
 		_window_t = WINDOW

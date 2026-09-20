@@ -129,7 +129,7 @@ func _check_layout(mm: Minimap) -> void:
 			var c := ch as Control
 			if c != null and c.is_visible_in_tree() and c.size.x > 1.0 and c.size.y > 1.0:
 				others.append([c.get_class() + " " + str(c.name), c.get_global_rect()])
-	for b in main.button_rects() if main.touch else []:
+	for b in main.input.button_rects() if main.touch else []:
 		var rad: float = b["r"]
 		others.append(["botón " + String(b["name"]), Rect2(Vector2(b["c"]) - Vector2(rad, rad), Vector2(rad, rad) * 2.0)])
 	others.append(["botón ☰", Rect2(12, 10, 64, 56)])

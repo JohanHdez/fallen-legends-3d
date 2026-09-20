@@ -113,6 +113,11 @@ const BOLT_HIT_RADIUS := 0.75
 
 var main: Main
 var vfx: Vfx
+# Único punto de salida de los efectos (2026-09-20, fase 0 del juego en línea, ver game/fx_sink.gd):
+# la lógica de aquí abajo ya no llama a `vfx` directamente, solo a `emit_fx`. Hoy `fx_sink` es
+# siempre `FxSink.LocalFx`, que pinta con este mismo `vfx` lo de siempre; en la fase 2 el servidor
+# le pondrá otro sink que convierta cada efecto en un aviso por red.
+var fx_sink: FxSink
 var rng: RandomNumberGenerator
 var fighters: Array = []            # Fighter; el índice es su id
 var bolts: Array = []               # proyectiles en vuelo
@@ -144,8 +149,21 @@ var _spore_tick := 0.0
 func _init(p_main: Main, p_vfx: Vfx) -> void:
 	main = p_main
 	vfx = p_vfx
+	fx_sink = FxSink.LocalFx.new(vfx)
 	rng = p_main.rng
 	minions = Minions.new(self)
+
+
+## Único punto de salida de un efecto visual (fase 0 del juego en línea, docs/superpowers/specs/
+## 2026-09-18-juego-en-linea-design.md, "Separar lógica y efectos en el combate"): antes esta clase
+## llamaba a `vfx.algo(...)` desde dentro de la lógica; ahora todo pasa por aquí y `fx_sink` decide
+## qué hacer con cada uno. `FxSink.check` rechaza (con `push_error`, sin reventar) un nombre que no
+## esté en el catálogo o al que le falte un argumento. Devuelve lo que el sink cree, para los pocos
+## efectos cuyo nodo hace falta guardar (una esfera de trampa, la burbuja de guardia...); null si no.
+func emit_fx(kind: String, args: Dictionary) -> Variant:
+	if not FxSink.check(kind, args):
+		return null
+	return fx_sink.emit(kind, args)
 
 
 # =====================================================================
@@ -425,6 +443,7 @@ func move_fighter(f: Fighter, delta: float) -> void:
 		var crawl := move_anim(step, f.facing(), Revive.DOWNED_STATE)
 		if f.anim.has_animation(crawl) and f.anim.current_animation != crawl:
 			main._play_all(f.anims, crawl)
+			sync_decoy_anims(f, crawl)
 	elif f.anim != null and f.cast_anim_t <= 0.0 and f.hit_anim_t <= 0.0 and f.alive():
 		var want := move_anim(step, f.facing(), ANIM_CROUCH if f.crouch else ANIM_JOG,
 			f.hp() < f.hp_max() * LOW_HP)
@@ -434,6 +453,7 @@ func move_fighter(f: Fighter, delta: float) -> void:
 			want = "Jog_Fwd" if moving else "Idle"
 		if f.anim.current_animation != want:
 			main._play_all(f.anims, want)
+			sync_decoy_anims(f, want)
 		for ap in f.anims:
 			ap.speed_scale = (spd / f.speed()) if moving else 1.0
 
@@ -524,7 +544,8 @@ func hurt(z: Dictionary, dmg: float, stun := 0.0, by: Fighter = null, slot := -1
 			if float(z["hp"]) <= 0.0:
 				z["hp"] = 0.0
 				var at: Vector3 = (z["node"] as Node3D).global_position + Vector3(0, 0.9, 0)
-				vfx.burst("magic_02", at, DECOY_TINT, 22, 0.6, 3.5, 0.7, 0.4)
+				emit_fx("burst", {"tex": "magic_02", "pos": at, "color": DECOY_TINT, "amount": 22,
+					"life": 0.6, "speed": 3.5, "size": 0.7, "grav": 0.4, "spread": 60.0, "from_radius": 0.1})
 		_:
 			dealt = minf(dmg, maxf(float(z["hp"]), 0.0))
 			z["hp"] = float(z["hp"]) - dmg
@@ -664,8 +685,9 @@ func tick_toxin(delta: float) -> void:
 		var dmg := float(z.get("tox_dps", 0.0)) * TOXIN_TICK
 		toxin_damage += dmg
 		hurt(z, dmg, 0.0, fighter_by_id(int(z.get("tox_by", -1))), int(z.get("tox_slot", -1)), false)
-		vfx.burst("magic_03", (node as Node3D).global_position + Vector3(0, 1.0, 0), TOXIN_COL,
-			5, 0.5, 1.0, 0.3, -0.6, 70.0, 0.25)
+		emit_fx("burst", {"tex": "magic_03", "pos": (node as Node3D).global_position + Vector3(0, 1.0, 0),
+			"color": TOXIN_COL, "amount": 5, "life": 0.5, "speed": 1.0, "size": 0.3, "grav": -0.6,
+			"spread": 70.0, "from_radius": 0.25})
 
 
 ## Devuelve la vida que de verdad le ha quitado.
@@ -713,7 +735,7 @@ func _down(f: Fighter, by: Fighter) -> void:
 	f.revive_progress = 0.0
 	f.streak = 0
 	if f.is_player:
-		main._touch_crouch = false     # al caer se suelta el botón de agacharse
+		main.input._touch_crouch = false     # al caer se suelta el botón de agacharse
 	f.crouch = false
 	f.windup = -1.0
 	f.windup_idx = -1
@@ -790,13 +812,15 @@ func _tick_soft_bolt(b: Dictionary, owner: Fighter, delta: float) -> bool:
 		hurt(hit, float(b["dmg"]), float(b["stun"]), owner, int(b.get("slot", -1)))
 		if b["pull"] and owner != null:
 			pull(hit, owner.pos())
-		vfx.flash(node.position, Color(bc.r + 0.2, bc.g + 0.2, bc.b + 0.2), 1.4, 0.16)
-		vfx.burst("spark_04", node.position, bc, 6, 0.22, 2.5, 0.3, -4.0, 35.0)
+		emit_fx("flash", {"at": node.position, "color": Color(bc.r + 0.2, bc.g + 0.2, bc.b + 0.2), "size": 1.4, "life": 0.16})
+		emit_fx("burst", {"tex": "spark_04", "pos": node.position, "color": bc, "amount": 6, "life": 0.22,
+			"speed": 2.5, "size": 0.3, "grav": -4.0, "spread": 35.0, "from_radius": 0.1})
 	elif float(b["range_left"]) > 0.0 and float(b["life"]) > 0.0:
 		return false
 	else:
 		soft_misses += 1
-		vfx.burst("spark_04", node.position, Color(bc.r, bc.g, bc.b, 0.6), 4, 0.2, 1.5, 0.2, -4.0, 60.0)
+		emit_fx("burst", {"tex": "spark_04", "pos": node.position, "color": Color(bc.r, bc.g, bc.b, 0.6),
+			"amount": 4, "life": 0.2, "speed": 1.5, "size": 0.2, "grav": -4.0, "spread": 60.0, "from_radius": 0.1})
 	node.queue_free()
 	return true
 
@@ -970,7 +994,8 @@ func cast_projectile(f: Fighter, ab: Dictionary, at: Vector3) -> void:
 	core.material_override = m
 	b.add_child(core)
 	# estela corta pegada a la bola, no una rociada en todas direcciones
-	var trail := vfx.emitter(b, "spark_04", Color(col.r, col.g, col.b, 0.9), 0.12, 18, 0.28, 0.2, 0.45)
+	var trail := emit_fx("emitter", {"parent": b, "tex": "spark_04", "color": Color(col.r, col.g, col.b, 0.9),
+		"radius": 0.12, "amount": 18, "life": 0.28, "rise": 0.2, "size": 0.45}) as CPUParticles3D
 	trail.position = Vector3.ZERO
 	b.position = f.pos() + Vector3(0, 1.2, 0)
 	main.add_child(b)
@@ -1060,11 +1085,14 @@ func tick_bolts(delta: float) -> void:
 			var bc: Color = b.get("col", Vfx.SPARK)
 			if b.get("spin", false):
 				# El ancla es hierro: al clavarse salta tierra, no chispas mágicas.
-				vfx.burst("dirt_02", node.position, Color(0.66, 0.56, 0.40, 0.95), 18, 0.7, 3.0, 0.4, -4.0, 60.0, 0.3)
-				vfx.burst("smoke_04", node.position, Color(0.78, 0.72, 0.60, 0.5), 10, 0.9, 1.2, 0.7, 0.2, 70.0, 0.4)
+				emit_fx("burst", {"tex": "dirt_02", "pos": node.position, "color": Color(0.66, 0.56, 0.40, 0.95),
+					"amount": 18, "life": 0.7, "speed": 3.0, "size": 0.4, "grav": -4.0, "spread": 60.0, "from_radius": 0.3})
+				emit_fx("burst", {"tex": "smoke_04", "pos": node.position, "color": Color(0.78, 0.72, 0.60, 0.5),
+					"amount": 10, "life": 0.9, "speed": 1.2, "size": 0.7, "grav": 0.2, "spread": 70.0, "from_radius": 0.4})
 			else:
-				vfx.flash(node.position, Color(bc.r + 0.2, bc.g + 0.2, bc.b + 0.2), 1.4, 0.16)
-				vfx.burst("spark_04", node.position, bc, 6, 0.22, 2.5, 0.3, -4.0, 35.0)
+				emit_fx("flash", {"at": node.position, "color": Color(bc.r + 0.2, bc.g + 0.2, bc.b + 0.2), "size": 1.4, "life": 0.16})
+				emit_fx("burst", {"tex": "spark_04", "pos": node.position, "color": bc, "amount": 6, "life": 0.22,
+					"speed": 2.5, "size": 0.3, "grav": -4.0, "spread": 35.0, "from_radius": 0.1})
 			if b.get("chain") != null and is_instance_valid(b["chain"]):
 				(b["chain"] as Node).queue_free()
 			node.queue_free()
@@ -1074,7 +1102,7 @@ func tick_bolts(delta: float) -> void:
 		if b.get("spin", false):
 			node.rotate_object_local(Vector3.FORWARD, delta * 9.0)   # el ancla vuela girando
 		if b.get("chain") != null and is_instance_valid(b["chain"]) and owner != null:
-			vfx.span(b["chain"], owner.pos() + Vector3(0, 1.3, 0), node.position)
+			emit_fx("span", {"mi": b["chain"], "a": owner.pos() + Vector3(0, 1.3, 0), "b": node.position})
 
 
 # -- cuerpo a cuerpo, carga, curación y mejora -----------------------
@@ -1089,14 +1117,16 @@ func cast_melee(f: Fighter, ab: Dictionary, at: Vector3, rad: float) -> void:
 	if face.length() < 0.1:
 		face = f.facing()
 	face = face.normalized()
-	var fx := vfx.disc(rad, ab.get("col", Color(1, 0.9, 0.6)), 0.22)
+	var fx := emit_fx("disc", {"radius": rad, "color": ab.get("col", Color(1, 0.9, 0.6)), "alpha": 0.22}) as MeshInstance3D
 	fx.position = origin + face * rad * 0.5 + Vector3(0, 0.05, 0)
 	main.add_child(fx)
-	vfx.sparks.append({"node": fx, "life": 0.18})
-	vfx.burst("slash_02", origin + face * rad * 0.6 + Vector3(0, 1.0, 0), Color(1, 0.95, 0.8),
-		4, 0.25, 1.0, rad * 0.9, 0.0, 20.0)
+	emit_fx("register_temp", {"node": fx, "life": 0.18})
+	emit_fx("burst", {"tex": "slash_02", "pos": origin + face * rad * 0.6 + Vector3(0, 1.0, 0),
+		"color": Color(1, 0.95, 0.8), "amount": 4, "life": 0.25, "speed": 1.0, "size": rad * 0.9,
+		"grav": 0.0, "spread": 20.0, "from_radius": 0.1})
 	if bool(ab.get("dust", false)):
-		vfx.swing_dust(origin, face, rad, full, float(ab.get("arc", MELEE_ARC)))
+		emit_fx("swing_dust", {"origin": origin, "face": face, "rad": rad, "full": full,
+			"arc": float(ab.get("arc", MELEE_ARC)), "amount": 1.0})
 	# Apertura del golpe, en grados de abanico total. El Mandoble de ancla barre 180°: todo lo que
 	# tenga delante, de hombro a hombro (petición del usuario). Cargado es la vuelta entera.
 	var half := deg_to_rad(float(ab.get("arc", MELEE_ARC))) * 0.5
@@ -1214,10 +1244,12 @@ func tick_dash(f: Fighter, delta: float) -> void:
 	f.body.velocity = Vector3.ZERO
 	f.body.move_and_collide(step)
 	# Humo continuo a los pies: es lo que hace que no parezca que se desliza.
-	vfx.burst("smoke_04", f.pos() + Vector3(0, 0.12, 0),
-		Color(0.82, 0.80, 0.72, 0.75), 5, 0.65, 1.1, 0.85, 0.1, 75.0, 0.35)
-	vfx.burst("dirt_01", f.pos() + Vector3(0, 0.15, 0),
-		Color(0.78, 0.72, 0.58), 5, 0.5, 2.2, 0.45, -3.0, 50.0)
+	emit_fx("burst", {"tex": "smoke_04", "pos": f.pos() + Vector3(0, 0.12, 0),
+		"color": Color(0.82, 0.80, 0.72, 0.75), "amount": 5, "life": 0.65, "speed": 1.1, "size": 0.85,
+		"grav": 0.1, "spread": 75.0, "from_radius": 0.35})
+	emit_fx("burst", {"tex": "dirt_01", "pos": f.pos() + Vector3(0, 0.15, 0),
+		"color": Color(0.78, 0.72, 0.58), "amount": 5, "life": 0.5, "speed": 2.2, "size": 0.45,
+		"grav": -3.0, "spread": 50.0, "from_radius": 0.1})
 	var fwd := f.dash_vec.normalized()
 	var perp := fwd.cross(Vector3.UP).normalized()
 	var to := f.pos()
@@ -1235,8 +1267,9 @@ func tick_dash(f: Fighter, delta: float) -> void:
 			if absf(side) < 0.01:
 				side = 1.0 if rng.randf() < 0.5 else -1.0
 			knock(z, perp * side, f.dash_shove)
-		vfx.burst("slash_03", (z["node"] as Node3D).global_position + Vector3(0, 1.0, 0),
-			Color(1, 0.9, 0.85), 3, 0.2, 1.0, 1.4, 0.0, 15.0)
+		emit_fx("burst", {"tex": "slash_03", "pos": (z["node"] as Node3D).global_position + Vector3(0, 1.0, 0),
+			"color": Color(1, 0.9, 0.85), "amount": 3, "life": 0.2, "speed": 1.0, "size": 1.4,
+			"grav": 0.0, "spread": 15.0, "from_radius": 0.1})
 
 
 ## Sanación del Clérigo: a sí mismo y a las leyendas de su equipo que tenga dentro del radio.
@@ -1249,12 +1282,12 @@ func cast_heal(f: Fighter, ab: Dictionary, rad: float) -> void:
 		if o != f and o.pos().distance_to(f.pos()) > rad:
 			continue
 		o.rec["hp"] = minf(o.hp() + amount, o.hp_max())
-	var fx := vfx.disc(rad, ab.get("col", Color(0.5, 1.0, 0.6)), 0.28)
+	var fx := emit_fx("disc", {"radius": rad, "color": ab.get("col", Color(0.5, 1.0, 0.6)), "alpha": 0.28}) as MeshInstance3D
 	fx.position = f.pos() + Vector3(0, 0.06, 0)
 	main.add_child(fx)
-	vfx.sparks.append({"node": fx, "life": 0.6})
-	vfx.burst("star_06", f.pos() + Vector3(0, 0.4, 0), ab.get("col", Color(0.55, 1.0, 0.6)),
-		26, 1.1, 2.2, 0.55, 1.6, 30.0, rad * 0.5)
+	emit_fx("register_temp", {"node": fx, "life": 0.6})
+	emit_fx("burst", {"tex": "star_06", "pos": f.pos() + Vector3(0, 0.4, 0), "color": ab.get("col", Color(0.55, 1.0, 0.6)),
+		"amount": 26, "life": 1.1, "speed": 2.2, "size": 0.55, "grav": 1.6, "spread": 30.0, "from_radius": rad * 0.5})
 
 
 ## El ancla se clava DONDE APUNTAS y quien la tira se queda libre (petición del usuario, 2026-09-18:
@@ -1279,8 +1312,8 @@ func cast_buff(f: Fighter, ab: Dictionary, at: Vector3, rad: float) -> void:
 	f.buff_at.y = 0.0
 	var fx := Node3D.new()
 	fx.position = f.buff_at + Vector3(0, 0.06, 0)
-	fx.add_child(vfx.ring(f.buff_rad, ab.get("col", Color(1.0, 0.8, 0.35)), 0.7))
-	fx.add_child(vfx.disc(f.buff_rad, ab.get("col", Color(1.0, 0.8, 0.35)), 0.08))
+	fx.add_child(emit_fx("ring", {"radius": f.buff_rad, "color": ab.get("col", Color(1.0, 0.8, 0.35)), "alpha": 0.7}) as MeshInstance3D)
+	fx.add_child(emit_fx("disc", {"radius": f.buff_rad, "color": ab.get("col", Color(1.0, 0.8, 0.35)), "alpha": 0.08}) as MeshInstance3D)
 	var anchor := main._make_anchor()
 	anchor.position = Vector3(0, 0.45, 0)
 	anchor.rotation_degrees = Vector3(18, 0, 0)     # clavada de medio lado, como quien la deja caer
@@ -1298,7 +1331,8 @@ func tick_buff(f: Fighter, delta: float) -> void:
 		f.buff_tick = 0.8
 		# El aura del Ancla clavada es otro golpe suyo y también levanta polvo, pero a la mitad:
 		# repite cada 0,8 s y con la carga del mandoble entero la nube no se despejaba nunca.
-		vfx.swing_dust(f.buff_at, Vector3(0, 0, 1), f.buff_rad, true, MELEE_ARC, 0.45)
+		emit_fx("swing_dust", {"origin": f.buff_at, "face": Vector3(0, 0, 1), "rad": f.buff_rad,
+			"full": true, "arc": MELEE_ARC, "amount": 0.45})
 		for z in foes_in(f.team, f.buff_at, f.buff_rad):
 			hurt(z, f.buff_dmg, 0.0, f, f.buff_slot)
 			pull(z, f.buff_at)
@@ -1322,7 +1356,7 @@ func tick_guard(f: Fighter, delta: float) -> void:
 			f.still_t += delta
 			f.guard = f.still_t >= GUARD_DELAY
 	if f.guard and f.guard_fx == null:
-		f.guard_fx = vfx.bubble(1.05, GUARD_COL)
+		f.guard_fx = emit_fx("bubble", {"radius": 1.05, "color": GUARD_COL}) as MeshInstance3D
 		f.guard_fx.position = Vector3(0, 0.95, 0)
 		f.body.add_child(f.guard_fx)
 	elif not f.guard and f.guard_fx != null:
@@ -1340,16 +1374,16 @@ func cast_zone(f: Fighter, ab: Dictionary, at: Vector3, rad: float, burst: bool)
 	var col: Color = ab.get("col", Vfx.SPARK)
 	var node := Node3D.new()
 	node.position = at
-	node.add_child(vfx.ring(rad, col, 0.85))
-	node.add_child(vfx.disc(rad, col, 0.12))
+	node.add_child(emit_fx("ring", {"radius": rad, "color": col, "alpha": 0.85}) as MeshInstance3D)
+	node.add_child(emit_fx("disc", {"radius": rad, "color": col, "alpha": 0.12}) as MeshInstance3D)
 	main.add_child(node)
 	if not burst:
-		vfx.gas_cloud(node, rad, col)
+		emit_fx("gas_cloud", {"node": node, "rad": rad, "col": col})
 		# Estallido: la granada revienta con una bocanada gorda antes de asentarse la nube.
-		vfx.burst("smoke_07", at + Vector3(0, 1.0, 0), Color(col.r, col.g, col.b, 0.9),
-			70, 1.8, 5.0, rad * 0.30, 0.15, 95.0, rad * 0.35)
-		vfx.burst("smoke_02", at + Vector3(0, 0.4, 0), Color(col.r * 0.85, col.g, col.b * 0.6, 0.8),
-			55, 2.4, 2.5, rad * 0.24, 0.05, 95.0, rad * 0.55)
+		emit_fx("burst", {"tex": "smoke_07", "pos": at + Vector3(0, 1.0, 0), "color": Color(col.r, col.g, col.b, 0.9),
+			"amount": 70, "life": 1.8, "speed": 5.0, "size": rad * 0.30, "grav": 0.15, "spread": 95.0, "from_radius": rad * 0.35})
+		emit_fx("burst", {"tex": "smoke_02", "pos": at + Vector3(0, 0.4, 0), "color": Color(col.r * 0.85, col.g, col.b * 0.6, 0.8),
+			"amount": 55, "life": 2.4, "speed": 2.5, "size": rad * 0.24, "grav": 0.05, "spread": 95.0, "from_radius": rad * 0.55})
 	storms.append({"node": node, "delay": float(ab.get("delay", 0.0)) if burst else 0.0,
 		"field": float(ab.get("field", 6.0)), "tick": 0.0, "hit": not burst, "rad": rad,
 		"dmg": float(ab.get("dmg", 0.0)), "stun": float(ab.get("stun", 0.0)),
@@ -1364,11 +1398,11 @@ func cast_trap(f: Fighter, ab: Dictionary, at: Vector3, rad: float, beacon: bool
 	var col: Color = ab.get("col", Vfx.SPARK)
 	var node := Node3D.new()
 	node.position = at
-	node.add_child(vfx.disc(rad, col, 0.10))
-	node.add_child(vfx.ring(rad, col, 0.35))
+	node.add_child(emit_fx("disc", {"radius": rad, "color": col, "alpha": 0.10}) as MeshInstance3D)
+	node.add_child(emit_fx("ring", {"radius": rad, "color": col, "alpha": 0.35}) as MeshInstance3D)
 	# En el centro, una esfera: eléctrica y flotante la trampa, apoyada en el suelo la del Químico
 	# (petición del usuario, 2026-09-17). Antes era un disco pequeño que no se leía como trampa.
-	var orb := vfx.nox_orb(col) if beacon else vfx.electric_orb(col)
+	var orb: Node3D = emit_fx("nox_orb", {"color": col}) as Node3D if beacon else emit_fx("electric_orb", {"color": col}) as Node3D
 	node.add_child(orb)
 	main.add_child(node)
 	var arming := main.is_pvp()
@@ -1404,7 +1438,7 @@ func cast_beacon(f: Fighter, ab: Dictionary, at: Vector3, rad: float) -> void:
 	body.position = at + Vector3(0, 0.0, 0)
 	# Una esfera apoyada en el suelo que se enciende y echa humo al activarse (petición del usuario,
 	# 2026-09-17; antes era un poste).
-	var orb := vfx.nox_orb(Color(ab["col"]) * BEACON_TINT)
+	var orb := emit_fx("nox_orb", {"color": Color(ab["col"]) * BEACON_TINT}) as Node3D
 	body.add_child(orb)
 	var cs := CollisionShape3D.new()
 	var shape := SphereShape3D.new()
@@ -1442,11 +1476,11 @@ func tick_beacons(delta: float) -> void:
 		if bc["spent"]:
 			continue
 		bc["age"] = float(bc["age"]) + delta
-		vfx.tick_orb(bc["orb"], float(bc["age"]), bool(bc["live"]))
+		emit_fx("tick_orb", {"root": bc["orb"], "t": float(bc["age"]), "live": bool(bc["live"])})
 		var ready := can_trigger(float(bc["age"]), main.is_pvp())
 		if ready and not bc["live"]:
 			bc["live"] = true
-			vfx.flash(node.global_position + Vector3(0, 0.8, 0), bc["col"], 1.6, 0.25)   # ya está activa
+			emit_fx("flash", {"at": node.global_position + Vector3(0, 0.8, 0), "color": bc["col"], "size": 1.6, "life": 0.25})   # ya está activa
 		var near := ready and not foes_in(int(bc["team"]), node.global_position, BEACON_TRIGGER, 1).is_empty()
 		if near or float(bc["hp"]) <= 0.0:
 			bc["spent"] = true
@@ -1460,7 +1494,8 @@ func tick_beacons(delta: float) -> void:
 func _pop_beacon(bc: Dictionary) -> void:
 	var at: Vector3 = (bc["node"] as Node3D).global_position
 	var col: Color = bc["col"]
-	vfx.burst("smoke_07", at + Vector3(0, 0.8, 0), Color(col.r, col.g, col.b, 0.8), 26, 1.2, 3.0, 2.0, 0.2, 90.0)
+	emit_fx("burst", {"tex": "smoke_07", "pos": at + Vector3(0, 0.8, 0), "color": Color(col.r, col.g, col.b, 0.8),
+		"amount": 26, "life": 1.2, "speed": 3.0, "size": 2.0, "grav": 0.2, "spread": 90.0, "from_radius": 0.1})
 	var owner := fighter_by_id(int(bc.get("owner", -1)))
 	if owner != null:
 		_sound(owner, "gas")
@@ -1468,10 +1503,10 @@ func _pop_beacon(bc: Dictionary) -> void:
 		main._sfx("gas")
 	var node := Node3D.new()
 	node.position = at
-	node.add_child(vfx.ring(float(bc["rad"]), col, 0.7))
-	node.add_child(vfx.disc(float(bc["rad"]), col, 0.10))
+	node.add_child(emit_fx("ring", {"radius": float(bc["rad"]), "color": col, "alpha": 0.7}) as MeshInstance3D)
+	node.add_child(emit_fx("disc", {"radius": float(bc["rad"]), "color": col, "alpha": 0.10}) as MeshInstance3D)
 	main.add_child(node)
-	vfx.gas_cloud(node, float(bc["rad"]), col)
+	emit_fx("gas_cloud", {"node": node, "rad": float(bc["rad"]), "col": col})
 	storms.append({"node": node, "delay": 0.0, "field": float(bc["dur"]), "tick": 0.0, "hit": true,
 		"rad": float(bc["rad"]), "dmg": 0.0, "stun": 0.0, "fdmg": float(bc["dmg"]), "fstun": 0.0,
 		"every": float(bc["every"]), "slow": float(bc["slow"]), "bolts": 0,
@@ -1484,7 +1519,7 @@ func tick_traps(delta: float) -> void:
 		var node: Node3D = t["node"]
 		var team := int(t["team"])
 		t["fx"] = float(t["fx"]) + delta
-		vfx.tick_orb(t["orb"], float(t["fx"]), bool(t["live"]))
+		emit_fx("tick_orb", {"root": t["orb"], "t": float(t["fx"]), "live": bool(t["live"])})
 		if t["armed"]:
 			t["age"] = float(t["age"]) + delta
 			if not can_trigger(float(t["age"]), main.is_pvp()):
@@ -1492,7 +1527,7 @@ func tick_traps(delta: float) -> void:
 			if not t["live"]:
 				t["live"] = true
 				(node.get_child(1) as Node3D).visible = true
-				vfx.spark(node.position + Vector3(0, 0.3, 0))
+				emit_fx("spark", {"at": node.position + Vector3(0, 0.3, 0), "col": Color(0.85, 0.92, 1.0)})
 			if foes_in(team, node.position, float(t["rad"])).is_empty():
 				continue          # armada sin caducar, como en el juego
 			t["armed"] = false
@@ -1512,7 +1547,7 @@ func tick_traps(delta: float) -> void:
 				if float(t["slow"]) > 0.0:
 					z["slow_t"] = 2.0
 				if not t["beacon"]:
-					vfx.spark(z["node"].global_position)
+					emit_fx("spark", {"at": z["node"].global_position, "col": Color(0.85, 0.92, 1.0)})
 					struck = true
 			if struck and owner != null:
 				_sound(owner, STRIKE_SOUND, -4.0)     # una descarga suena una vez, caigan los rayos que caigan
@@ -1532,7 +1567,8 @@ func tick_storms(delta: float) -> void:
 			st["delay"] -= delta
 			if st["delay"] <= 0.0:
 				st["hit"] = true
-				vfx.zone_burst(st, node.position, rad)
+				emit_fx("zone_burst", {"at": node.position, "rad": rad, "col": st.get("col", Vfx.SPARK),
+					"fx": String(st.get("fx", "spark")), "bolts": int(st.get("bolts", 0))})
 				var storm := is_storm(st)
 				var hit_any := false
 				for z in foes_in(team, node.position, rad):
@@ -1577,7 +1613,7 @@ static func is_storm(st: Dictionary) -> bool:
 
 ## Un rayo del cielo sobre una víctima de la tormenta.
 func _strike(z: Dictionary) -> void:
-	vfx.spark((z["node"] as Node3D).global_position)
+	emit_fx("spark", {"at": (z["node"] as Node3D).global_position, "col": Color(0.85, 0.92, 1.0)})
 	storm_strikes += 1
 
 
@@ -1592,7 +1628,10 @@ func cast_spikes(f: Fighter, ab: Dictionary, at: Vector3) -> void:
 	spikes.append({"from": f.pos(), "dir": dir.normalized(),
 		"len": f.ability_range(2), "grown": 0.0, "left": float(ab.get("dur", 10.0)),
 		"tick": 0.0, "every": float(ab.get("tick", 1.0)), "rad": f.ability_radius(2),
-		"dmg": float(ab.get("dmg", 20.0)), "stun": float(ab.get("stun", 2.0)), "nodes": [],
+		# `at` son las posiciones de las matas: ESTADO de la partida (deciden a quién pincha el muro),
+		# no dibujo. Antes se leían del nodo visual, así que un servidor que no pinta se habría
+		# quedado sin muro sin que nadie se enterara (revisión de la tarea 3, 2026-09-20).
+		"dmg": float(ab.get("dmg", 20.0)), "stun": float(ab.get("stun", 2.0)), "nodes": [], "at": [],
 		"team": f.team, "owner": f.id, "slot": _cast_slot})
 
 
@@ -1602,19 +1641,23 @@ func tick_spikes(delta: float) -> void:
 		var full := float(sp["len"])
 		if sp["grown"] < full:
 			sp["grown"] = minf(full, float(sp["grown"]) + full * delta / 0.6)
-			while float(sp["nodes"].size()) * 1.1 < float(sp["grown"]):
-				var d := vfx.spike_clump(float(sp["rad"]))
-				d.position = sp["from"] + sp["dir"] * (sp["nodes"].size() * 1.1) + Vector3(0, 0.0, 0)
-				main.add_child(d)
-				vfx.burst("dirt_02", d.position, Color(0.75, 0.68, 0.5), 8, 0.5, 3.0, 0.5, -5.0)
-				sp["nodes"].append(d)
+			while float(sp["at"].size()) * 1.1 < float(sp["grown"]):
+				var at: Vector3 = sp["from"] + sp["dir"] * (sp["at"].size() * 1.1)
+				sp["at"].append(at)
+				var d := emit_fx("spike_clump", {"rad": float(sp["rad"])}) as Node3D
+				if d != null:
+					d.position = at
+					main.add_child(d)
+					sp["nodes"].append(d)
+				emit_fx("burst", {"tex": "dirt_02", "pos": at, "color": Color(0.75, 0.68, 0.5),
+					"amount": 8, "life": 0.5, "speed": 3.0, "size": 0.5, "grav": -5.0, "spread": 60.0, "from_radius": 0.1})
 		sp["left"] -= delta
 		sp["tick"] -= delta
 		if sp["tick"] <= 0.0:
 			sp["tick"] = float(sp["every"])
 			var owner := fighter_by_id(int(sp.get("owner", -1)))
-			for n in sp["nodes"]:
-				for z in foes_in(int(sp["team"]), (n as Node3D).position, float(sp["rad"])):
+			for at: Vector3 in sp["at"]:
+				for z in foes_in(int(sp["team"]), at, float(sp["rad"])):
 					hurt(z, float(sp["dmg"]), float(sp["stun"]), owner, int(sp.get("slot", -1)))
 		if sp["left"] <= 0.0:
 			for n in sp["nodes"]:
@@ -1701,6 +1744,25 @@ func sync_decoy_labels(f: Fighter) -> void:
 			sync_decoy_label(al, f)
 
 
+## El mismo gesto, en el MISMO fotograma. `tick_decoys` copia la animación de la leyenda, pero corre
+## dentro del mundo, y a TU leyenda main.gd la mueve después: el clon iba siempre un fotograma por
+## detrás. Quieto no se nota; arrastrándose derribada sí, porque la dirección del gateo cambia cada
+## poco y el clon se quedaba gateando hacia otro lado —que es precisamente lo que delata la ilusión
+## (lo cazó tests/decoy_probe.gd el 2026-09-20). Se llama solo cuando la animación CAMBIA, no por
+## fotograma.
+func sync_decoy_anims(f: Fighter, anim_name: String) -> void:
+	if f.anim == null or anim_name == "":
+		return
+	for al in allies:
+		if String(al.get("kind", "")) != "decoy" or int(al.get("owner", -1)) != f.id or float(al["hp"]) <= 0.0:
+			continue
+		for ap in (al["anims"] as Array):
+			var p := ap as AnimationPlayer
+			if p.has_animation(anim_name) and p.current_animation != anim_name:
+				p.play(anim_name)
+			p.speed_scale = f.anim.speed_scale
+
+
 ## ¿Hay un señuelo suyo vivo para intercambiarse con él? (Ability.decoy_swap)
 func decoy_alive(f: Fighter) -> Dictionary:
 	for al in allies:
@@ -1723,8 +1785,10 @@ func swap_with_decoy(f: Fighter, al: Dictionary) -> void:
 	f.body.global_position = to
 	f.prev_pos = to            # el salto NO es "paso": si no, los clones lo copian y se dispara
 	body.global_position = mine
-	vfx.burst("magic_02", mine + Vector3(0, 0.9, 0), DECOY_TINT, 18, 0.5, 3.0, 0.6, 0.3)
-	vfx.burst("magic_02", f.pos() + Vector3(0, 0.9, 0), DECOY_TINT, 18, 0.5, 3.0, 0.6, 0.3)
+	emit_fx("burst", {"tex": "magic_02", "pos": mine + Vector3(0, 0.9, 0), "color": DECOY_TINT,
+		"amount": 18, "life": 0.5, "speed": 3.0, "size": 0.6, "grav": 0.3, "spread": 60.0, "from_radius": 0.1})
+	emit_fx("burst", {"tex": "magic_02", "pos": f.pos() + Vector3(0, 0.9, 0), "color": DECOY_TINT,
+		"amount": 18, "life": 0.5, "speed": 3.0, "size": 0.6, "grav": 0.3, "spread": 60.0, "from_radius": 0.1})
 	_sound(f, "decoy")
 
 
@@ -1761,12 +1825,13 @@ func spawn_ally(f: Fighter, kind: String, pos: Vector3, life: float, mode := 1, 
 	if kind == "decoy":
 		# Bocanada de humo en vez de estirarlos desde el suelo: así aparecen de golpe, del tamaño
 		# correcto, y el humo tapa el instante en que salen.
-		vfx.burst("smoke_07", body.position + Vector3(0, 0.8, 0), Color(0.85, 0.85, 0.9, 0.7),
-			22, 1.0, 2.2, 1.6, 0.3, 80.0, 0.5)
-		vfx.burst("smoke_04", body.position + Vector3(0, 0.4, 0), Color(0.8, 0.8, 0.85, 0.6),
-			14, 1.3, 1.2, 2.2, 0.1, 90.0, 0.7)
+		emit_fx("burst", {"tex": "smoke_07", "pos": body.position + Vector3(0, 0.8, 0), "color": Color(0.85, 0.85, 0.9, 0.7),
+			"amount": 22, "life": 1.0, "speed": 2.2, "size": 1.6, "grav": 0.3, "spread": 80.0, "from_radius": 0.5})
+		emit_fx("burst", {"tex": "smoke_04", "pos": body.position + Vector3(0, 0.4, 0), "color": Color(0.8, 0.8, 0.85, 0.6),
+			"amount": 14, "life": 1.3, "speed": 1.2, "size": 2.2, "grav": 0.1, "spread": 90.0, "from_radius": 0.7})
 	else:
-		vfx.burst("magic_05", body.position + Vector3(0, 0.9, 0), Color(0.6, 1.0, 0.7), 20, 0.8, 3.0, 0.9, 1.0)
+		emit_fx("burst", {"tex": "magic_05", "pos": body.position + Vector3(0, 0.9, 0), "color": Color(0.6, 1.0, 0.7),
+			"amount": 20, "life": 0.8, "speed": 3.0, "size": 0.9, "grav": 1.0, "spread": 60.0, "from_radius": 0.1})
 	var anims := main._anims_of(model)
 	main._play_all(anims, "Idle" if kind == "decoy" else "Zombie_Walk_Fwd")
 	if kind == "decoy" and f.model != null:
@@ -1866,7 +1931,8 @@ func cast_spores(f: Fighter, _ab: Dictionary, at: Vector3, rad: float) -> void:
 	f.spore_dps = SPORE_BASE
 	for z in foes_in(f.team, at, rad):
 		infect(z, f, _cast_slot)
-	vfx.burst("magic_04", at + Vector3(0, 0.8, 0), SPORE_COL, 24, 0.9, 3.0, 0.8, 0.5, 70.0, rad * 0.5)
+	emit_fx("burst", {"tex": "magic_04", "pos": at + Vector3(0, 0.8, 0), "color": SPORE_COL,
+		"amount": 24, "life": 0.9, "speed": 3.0, "size": 0.8, "grav": 0.5, "spread": 70.0, "from_radius": rad * 0.5})
 
 
 ## Los bultos: cuatro protuberancias pegadas al cuerpo. Solo coge la plaga lo que tiene cuerpo
@@ -1884,31 +1950,18 @@ func infect(z: Dictionary, by: Fighter, slot := -1) -> void:
 	z["spore_t"] = SPORE_TIME
 	z["spore_by"] = by.id if by != null else -1
 	z["spore_slot"] = slot
+	# Los bultos los construye ahora `Vfx` (2026-09-20): aquí se sorteaban con el `rng` del combate,
+	# que es el que decide la partida, así que un servidor que no pinta habría jugado otra distinta.
+	# Y como el sink puede no pintar nada (el servidor de la fase 2), la infección se apunta igual
+	# aunque no haya bultos: lo visual es opcional, lo de arriba no.
 	var body: Node3D = z["node"]
-	var lumps := Node3D.new()
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = SPORE_COL
-	mat.emission_enabled = true
-	mat.emission = SPORE_COL * 0.6
-	# A la medida del bicho: en un duende de 0,93 m los bultos del esqueleto le flotaban
-	# por encima de la cabeza.
-	var hs := float(z.get("cap", 1.7)) / 1.7
-	for i in 4:
-		var sph := SphereMesh.new()
-		var r := rng.randf_range(0.10, 0.20) * hs
-		sph.radius = r
-		sph.height = r * 2.0
-		sph.radial_segments = 6
-		sph.rings = 4
-		var mi := MeshInstance3D.new()
-		mi.mesh = sph
-		mi.material_override = mat
-		var a := TAU * i / 4.0 + rng.randf()
-		mi.position = Vector3(cos(a) * 0.22 * hs, rng.randf_range(0.5, 1.5) * hs, sin(a) * 0.22 * hs)
-		lumps.add_child(mi)
-	vfx.emitter(lumps, "magic_03", Color(SPORE_COL.r, SPORE_COL.g, SPORE_COL.b, 0.5), 0.35, 8, 1.2, 0.35, 0.35)
-	body.add_child(lumps)
-	z["spore_fx"] = lumps
+	var hs := float(z.get("cap", 1.7)) / 1.7      # a la medida del bicho, o al duende le flotaban
+	var lumps := emit_fx("spore_lumps", {"color": SPORE_COL, "scale": hs}) as Node3D
+	if lumps != null:
+		emit_fx("emitter", {"parent": lumps, "tex": "magic_03", "color": Color(SPORE_COL.r, SPORE_COL.g, SPORE_COL.b, 0.5),
+			"radius": 0.35, "amount": 8, "life": 1.2, "rise": 0.35, "size": 0.35})
+		body.add_child(lumps)
+		z["spore_fx"] = lumps
 
 
 func cure(z: Dictionary) -> void:
@@ -1929,8 +1982,9 @@ func _infectable() -> Array:
 ## Al morir un infectado los bultos revientan y la plaga salta a los de alrededor.
 func spore_burst(z: Dictionary) -> void:
 	var at: Vector3 = (z["node"] as Node3D).global_position + Vector3(0, 0.9, 0)
-	vfx.burst("magic_04", at, SPORE_COL, 30, 1.0, 5.0, 0.7, -1.0, 90.0, 0.3)
-	vfx.flash(at, SPORE_COL, 1.6, 0.3)
+	emit_fx("burst", {"tex": "magic_04", "pos": at, "color": SPORE_COL, "amount": 30, "life": 1.0,
+		"speed": 5.0, "size": 0.7, "grav": -1.0, "spread": 90.0, "from_radius": 0.3})
+	emit_fx("flash", {"at": at, "color": SPORE_COL, "size": 1.6, "life": 0.3})
 	var owner := fighter_by_id(int(z.get("spore_by", -1)))
 	if owner == null:
 		cure(z)
@@ -2008,7 +2062,7 @@ func tick_world(delta: float) -> void:
 	for f: Fighter in fighters:
 		tick_summon_queue(f, delta)
 	tick_allies(delta)
-	vfx.tick(delta)
+	emit_fx("tick", {"delta": delta})
 
 
 ## Refresca todas las barras: leyendas, criaturas y aliados.
