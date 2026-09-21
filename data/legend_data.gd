@@ -93,8 +93,20 @@ const ABILITIES := {
 		 "tough": true},   # desviación: vida ×3 por equipos (en el 2D un golpe los deshace)
 	],
 	"caballero": [
-		{"n": "Lanzada", "col": Color(0.85, 0.85, 0.9), "sfx": "melee", "k": "melee", "cd": 0.8, "cast": 0.2, "dmg": 30.0, "rad": 115.0,
-		 "anim": "Sword_Regular_A"},
+		# Desviación del 2D (petición del usuario, 2026-09-20, misma tanda que el aguante y el combo:
+		# "permitir pegar más rápido"): recarga 0,8 -> 0,65 s (sube el daño sostenido un 23 %). La
+		# munición por equipos (PVP_AMMO, un golpe cada 1,0 s) NO se toca: el empujón es mayor en el
+		# cuerpo a cuerpo corto, no en el desgaste a distancia. `combo_hits`/`combo_rad`/`combo_anim`/
+		# `combo_adur` (parecido a `anim_charged`/`adur_charged` del mandoble cargado del Rompemareas,
+		# pero campos propios: el combo es automático, no por mantener el botón, y su golpe normal
+		# tiene que seguir saliendo rápido): dos golpes que ACIERTAN en menos de Combat.COMBO_WINDOW s
+		# hacen que el tercero salga con `Sword_Regular_Combo` (3,0 s en la biblioteca) y un abanico
+		# más ancho (115 -> 150 px). `combo_adur` 1,2 s lo deja a 2,5×: se ve más grande que el tajo
+		# normal (0,43 s a 1,2×) sin ser un paseo. No sube el daño (primero se mide solo con el arco;
+		# si se queda corto, se sube en una segunda pasada).
+		{"n": "Lanzada", "col": Color(0.85, 0.85, 0.9), "sfx": "melee", "k": "melee", "cd": 0.65, "cast": 0.2, "dmg": 30.0, "rad": 115.0,
+		 "combo_hits": 2, "combo_rad": 150.0, "anim": "Sword_Regular_A",
+		 "combo_anim": "Sword_Regular_Combo", "combo_adur": 1.2},
 		# Corte de hacha (antes "Carga con escudo": el Caballero lleva hacha, no escudo).
 		# Desviación del 2D (petición del usuario, 2026-09-18, "es muy lenta... debería poder escapar
 		# usando esa habilidad muy rápido, y activársele cada 5 segundos y la cadencia y área de daño
@@ -102,8 +114,12 @@ const ABILITIES := {
 		# "sync": ya no dura lo que la animación (1,57 s para 10,9 m, un paseo) sino lo que marca
 		# `spd` (1500 px/s = 23,4 m/s -> 0,47 s), con la animación acelerada al triple. Además
 		# Combat.cast_dash le quita el `slow_t`: con el gas encima era todavía más lenta.
+		# Desviación del 2D (petición del usuario, 2026-09-20, "permitir tener 3 oportunidades"):
+		# `"chg": 3`, el mismo sistema de cargas que Alzar esqueleto (Rey liche) y las trampas: hasta
+		# tres embestidas guardadas, cada una tarda `cd` en recuperarse. Encadena dos para alcanzar a
+		# alguien y deja la tercera para escapar.
 		{"n": "Corte de hacha", "col": Color(0.8, 0.3, 0.3), "sfx": "dash", "k": "dash", "cd": 5.0,
-		 "cast": 0.12, "dmg": 32.0, "rng": 700.0, "rad": 130.0, "spd": 1500.0, "shove": 5.5,
+		 "cast": 0.12, "dmg": 32.0, "rng": 700.0, "rad": 130.0, "spd": 1500.0, "shove": 5.5, "chg": 3,
 		 "anim": "Sword_Dash"},
 		# Muro de espinas: el .tres trae 46 px de radio; x3 a petición del usuario (0,7 m -> 2,2 m).
 		{"n": "Muro de espinas", "col": Color(0.85, 0.35, 0.3), "sfx": "spikes", "k": "spikes", "cd": 25.0, "cast": 0.5, "dmg": 20.0, "rng": 840.0, "rad": 138.0,
@@ -208,7 +224,13 @@ const LEGENDS := [
 	 "models": [HEAD_M, CHARS + "Male_Ranger.gltf"]},
 	{"id": "ilusionista", "name": "Ilusionista", "hp": 200.0, "speed": 240.0, "tint": Color.WHITE,
 	 "models": [HEAD_F, CHARS + "Female_Ranger.gltf", CHARS + "Hair_Long.gltf"]},
+	# "melee_armor" (petición del usuario, 2026-09-20: es la leyenda más floja en duelos, 33 %, y su
+	# papel es aguantar y llegar): 25 % menos de daño cuando el golpe es de una habilidad cuerpo a
+	# cuerpo (k = "melee" o "dash"), en Combat.hurt/melee_armor_mult. Se acumula con la Guardia
+	# (Combat.GUARD_DAMAGE_MULT 0,55): quieto y cubriéndose, un hachazo le hace 0,55 × 0,75 = 41 % del
+	# daño. Si al medir resulta intocable, se baja.
 	{"id": "caballero", "name": "Caballero esqueleto", "hp": 380.0, "speed": 200.0, "tint": Color.WHITE, "guard": true,
+	 "melee_armor": 0.25,
 	 "models": [CHARS + "Skeleton_A.glb"]},
 	{"id": "rompemareas", "name": "Rompemareas", "hp": 360.0, "speed": 205.0, "tint": Color.WHITE,
 	 "models": [CHARS + "Tidebreaker.glb"]},

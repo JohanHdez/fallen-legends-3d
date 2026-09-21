@@ -124,5 +124,50 @@ func _init() -> void:
 	_check(Combat.SNAP_R >= 2.0 and Combat.SNAP_R <= 6.0, "el imán del apuntado es de unos metros")
 	_check(float(LegendData.ABILITIES["clerigo"][2]["rad"]) >= 300.0, "y la nube es más ancha que antes (190 px)")
 
+	# El Caballero esqueleto (petición del usuario, 2026-09-20: es la leyenda más floja en duelos,
+	# 33 %): aguante al cuerpo a cuerpo, básica más rápida, Corte de hacha con tres cargas y combo
+	# automático al tercer golpe.
+	_check(LegendData.LEGENDS[3]["id"] == "caballero", "la leyenda 3 sigue siendo el Caballero")
+	var armor := float(LegendData.LEGENDS[3].get("melee_armor", 0.0))
+	_check(is_equal_approx(armor, 0.25), "el aguante empieza en 25%% (si se baja al medir, se actualiza aquí)")
+	_check(is_equal_approx(Combat.melee_armor_mult(armor, "melee"), 0.75), "un golpe cuerpo a cuerpo hace un 25%% menos")
+	_check(is_equal_approx(Combat.melee_armor_mult(armor, "dash"), 0.75), "una carga también es cuerpo a cuerpo")
+	_check(is_equal_approx(Combat.melee_armor_mult(armor, "proj"), 1.0), "uno a distancia no se reduce")
+	_check(is_equal_approx(Combat.melee_armor_mult(armor, "zone"), 1.0), "ni una zona")
+	_check(is_equal_approx(Combat.GUARD_DAMAGE_MULT * Combat.melee_armor_mult(armor, "melee"), 0.4125),
+		"se acumula con la Guardia: quieto y cubriéndose, un hachazo le hace 0,55 × 0,75 = 41 %% del daño")
+
+	var lanzada: Dictionary = LegendData.ABILITIES["caballero"][0]
+	_check(is_equal_approx(float(lanzada["cd"]), 0.65), "la básica sale cada 0,65 s (antes 0,8)")
+	_check(int(LegendData.ABILITIES["caballero"][1].get("chg", 0)) == 3, "Corte de hacha guarda tres cargas")
+
+	# Combo automático (petición del usuario, 2026-09-20): dos golpes básicos que ACIERTAN en menos
+	# de COMBO_WINDOW s hacen que el tercero sea el de combo, con más arco; fallar o pasar el tiempo
+	# reinicia la cuenta.
+	var needed := int(lanzada.get("combo_hits", 0))
+	_check(needed == 2, "hacen falta dos aciertos antes del combo")
+	_check(float(lanzada.get("combo_rad", 0.0)) > float(lanzada["rad"]), "el golpe de combo abre más que el normal (115 -> 150 px)")
+	_check(String(lanzada.get("combo_anim", "")) == "Sword_Regular_Combo", "usa el mismo combo que el Rompemareas al cargar")
+	_check(LegendData.HERO_ANIMS_2.split(",").has("Sword_Regular_Combo"), "y está injertado")
+	_check(not Combat.combo_ready(0, needed), "sin golpes, no hay combo")
+	_check(not Combat.combo_ready(1, needed), "con uno tampoco")
+	_check(Combat.combo_ready(2, needed), "con dos seguidos, el que viene es el de combo")
+	_check(Combat.combo_ready(3, needed), "y si por lo que sea pasa de dos, sigue listo")
+	_check(Combat.combo_next_streak(0, needed, true) == 1, "el primer acierto cuenta uno")
+	_check(Combat.combo_next_streak(1, needed, true) == 2, "el segundo llega a dos: el siguiente es el combo")
+	_check(Combat.combo_next_streak(1, needed, false) == 0, "fallar reinicia la cuenta")
+	_check(Combat.combo_next_streak(2, needed, true) == 0, "el golpe de combo se consume al acertar")
+	_check(Combat.combo_next_streak(2, needed, false) == 0, "...y también si falla")
+	_check(is_equal_approx(Combat.COMBO_WINDOW, 2.0), "la ventana del combo son los 2 s que pidió el usuario")
+	_check(is_equal_approx(Combat.combo_tick(Combat.COMBO_WINDOW, Combat.COMBO_WINDOW + 0.1), 0.0),
+		"pasado de sobra el tiempo, no queda ventana")
+	_check(Combat.combo_tick(Combat.COMBO_WINDOW, 0.1) > 0.0, "un instante después todavía queda")
+	# Fuera de alcance (diseño 2026-09-20): el combo automático es solo del Caballero.
+	for legend in LegendData.ABILITIES:
+		if legend == "caballero":
+			continue
+		for other_ab in LegendData.ABILITIES[legend]:
+			_check(int(other_ab.get("combo_hits", 0)) == 0, "%s no tiene combo automático: es solo del Caballero" % legend)
+
 	print("test_combat_rules: %s (%d fallos)" % ["OK" if failures == 0 else "FALLO", failures])
 	quit(1 if failures > 0 else 0)

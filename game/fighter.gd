@@ -27,6 +27,11 @@ var legend := 0
 var is_player := false
 var display_name := ""
 var brain: RefCounted = null          # BotBrain, o null si la maneja una persona
+var peer := 0                         # juego en línea: id de peer que la maneja; 0 = bot o sin conexión
+# El servidor no tiene ratón que leer (headless, sin ventana): un Fighter remoto (peer != 0) no puede
+# mirar con main.cam_forward() como el jugador local, así que RemoteControl guarda aquí el yaw que
+# mandó su jugador (el mismo con el que calculó su "wish") y Combat.face_dir lo usa para orientarlo.
+var aim_yaw := 0.0
 
 var body: CharacterBody3D
 var model: Node3D
@@ -80,6 +85,12 @@ var dash_slot := -1                    # ranura que lanzó la carga en curso (la
 
 var swing_charge_t := 0.0
 var charge_mult := 1.0
+
+# Combo automático de la básica (petición del usuario, 2026-09-20; hoy solo el Caballero, ver
+# "combo_hits" en LegendData.ABILITIES): golpes seguidos que han acertado y lo que queda del reloj
+# de Combat.COMBO_WINDOW antes de que un silencio los reinicie (Combat.tick_fighter).
+var combo_streak := 0
+var combo_window_t := 0.0
 
 var guard := false
 var guard_fx: Node3D = null
@@ -249,6 +260,8 @@ func reset_abilities() -> void:
 		chg_t[i] = 0.0
 	ammo = ammo_max
 	ammo_t = 0.0
+	combo_streak = 0            # una ronda nueva no hereda el combo a medias de la anterior
+	combo_window_t = 0.0
 
 
 ## Munición de su leyenda por equipos (LegendData.PVP_AMMO), llena. Sin fila, sin límite.

@@ -58,6 +58,8 @@ const GUARD_DAMAGE_MULT := 0.55     # recibe un 45 % menos
 const GUARD_COL := Color(0.45, 0.72, 1.0)
 const KNOCK_TIME := 0.35            # lo que dura el desplazamiento de un empujón
 const PULL_SPEED := 14.0            # m/s a los que el ancla arrastra: el tiempo sale de la distancia
+# --- combo automático de la básica del Caballero (petición del usuario, 2026-09-20) ---
+const COMBO_WINDOW := 2.0           # s sin acertar otro golpe antes de que la cuenta se reinicie
 
 # --- señuelos del Ilusionista (decoy.gd del juego) ---
 const DECOY_TINT := Color(0.85, 0.8, 1.35)
@@ -348,6 +350,13 @@ func tick_fighter(f: Fighter, delta: float) -> void:
 		f.last_seen = f.pos()
 	f.swap_t = maxf(0.0, f.swap_t - delta)
 	f.invuln_t = maxf(0.0, f.invuln_t - delta)
+	# Combo automático de la básica (petición del usuario, 2026-09-20): si pasan COMBO_WINDOW s sin
+	# acertar otro golpe, la cuenta se reinicia sola (combo_streak solo llega aquí a 0 si ya estaba a
+	# 0, así que no hace falta mirar si sigue en marcha un preaviso).
+	if f.combo_window_t > 0.0:
+		f.combo_window_t = combo_tick(f.combo_window_t, delta)
+		if f.combo_window_t <= 0.0:
+			f.combo_streak = 0
 	if f.ult_by_charge and f.alive() and (main.team_mode == null or main.team_mode.rules.state == "playing"):
 		f.ult_charge = minf(f.ult_charge + Fighter.ULT_PASSIVE * delta, 1.0)
 	f.since_damage += delta
@@ -526,7 +535,13 @@ func hurt(z: Dictionary, dmg: float, stun := 0.0, by: Fighter = null, slot := -1
 			if z["hp"] <= 0.0:
 				main._kill_zombie(z, by)
 		"fighter":
-			dealt = _hurt_fighter(fighter_by_id(int(z["fid"])), dmg, stun, by)
+			var victim := fighter_by_id(int(z["fid"]))
+			var fdmg := dmg
+			# Aguante al cuerpo a cuerpo (Combat.melee_armor_mult, campo "melee_armor" en la víctima):
+			# solo si el golpe viene de una habilidad (slot conocido) y de quien la lanzó.
+			if victim != null and by != null and slot >= 0 and slot <= 2:
+				fdmg *= melee_armor_mult(float(victim.data().get("melee_armor", 0.0)), String(by.abil(slot).get("k", "")))
+			dealt = _hurt_fighter(victim, fdmg, stun, by)
 		"decoy":
 			# Un solo golpe disipa un señuelo, como en el juego; los clones de la Fiesta (`tough`) aguantan
 			# su vida. Un campo que no hace daño no cuenta.
@@ -617,6 +632,11 @@ static func hit_anim(from: Vector3, facing: Vector3) -> String:
 ## tercera persona: así puedes disparar de frente mientras te mueves de lado); un bot, a su objetivo
 ## si lo tiene; y si no hay nada de eso, hacia donde anda.
 func face_dir(f: Fighter, wish: Vector3) -> Vector3:
+	# Juego en línea (servidor, tarea 3): una leyenda remota (peer != 0) no tiene ratón que leer aquí
+	# (headless, sin ventana): main.cam_forward() ni se movería. Mira hacia el yaw que mandó su
+	# jugador, que RemoteControl.apply ya dejó en aim_yaw.
+	if f.peer != 0:
+		return Vector3(sin(f.aim_yaw), 0.0, cos(f.aim_yaw))
 	if f.brain == null and f.is_player:
 		return main.cam_forward()
 	if f.brain != null:
@@ -650,6 +670,36 @@ static func move_anim(wish: Vector3, facing: Vector3, state: String, hurt := fal
 ## Segundos de veneno tras un golpe más: se acumulan hasta TOXIN_MAX.
 static func toxin_time(cur: float, add: float) -> float:
 	return minf(cur + add, TOXIN_MAX)
+
+
+## Aguante al cuerpo a cuerpo (petición del usuario, 2026-09-20; campo `"melee_armor"` en la LEYENDA,
+## hoy solo el Caballero: 0,25). Nada si el golpe no es de una habilidad cuerpo a cuerpo (`k` =
+## "melee" o "dash"). Se acumula con la Guardia (GUARD_DAMAGE_MULT), que multiplica aparte en
+## _hurt_fighter: quieto y cubriéndose, un hachazo le hace 0,55 × 0,75 = 41 % del daño.
+static func melee_armor_mult(armor: float, k: String) -> float:
+	return (1.0 - armor) if (k == "melee" or k == "dash") else 1.0
+
+
+## Combo automático de la básica (petición del usuario, 2026-09-20; hoy solo el Caballero, campos
+## "combo_hits"/"combo_rad"/"combo_anim"/"combo_adur" en su Lanzada): tras `needed` golpes SEGUIDOS
+## que aciertan, el siguiente es el golpe de combo. Puras: no miran a un Fighter, para probarlas
+## sueltas.
+static func combo_ready(streak: int, needed: int) -> bool:
+	return needed > 0 and streak >= needed
+
+
+## Cuenta que queda tras resolver un golpe: el de combo se CONSUME (vuelve a 0, no se pisa con el
+## siguiente); un fallo también reinicia; un acierto normal suma uno, sin pasar de `needed`.
+static func combo_next_streak(streak: int, needed: int, hit: bool) -> int:
+	if combo_ready(streak, needed) or not hit:
+		return 0
+	return mini(streak + 1, needed)
+
+
+## Lo que queda del reloj de COMBO_WINDOW tras `delta` segundos sin otro acierto; a 0, el llamador
+## reinicia la cuenta (Combat.tick_fighter).
+static func combo_tick(window_t: float, delta: float) -> float:
+	return maxf(0.0, window_t - delta)
 
 
 ## Envenena una ficha (criatura, leyenda, esbirro o señuelo).
@@ -899,11 +949,19 @@ func start_cast(f: Fighter, i: int, at: Vector3) -> void:
 	# `adur` alarga SOLO la animación, no el preaviso: el lanzamiento de roca dura 1,33 s y
 	# comprimido a los 0,35 s del preaviso salía a 3,8x. El conjuro sale a su hora igual.
 	var dur := maxf(float(ab.get("adur_charged" if charged else "adur", 0.0)), maxf(f.windup, 0.35))
-	f.cast_anim_t = dur
 	# Cada habilidad puede pedir su propia animación ("anim"): el mazazo del Cíclope y el
 	# terremoto del Guerrero usan un tajo corto, la roca OverhandThrow y la Retirada Roll.
 	# Si no la pide, o el modelo no la trae, se cae al reparto de siempre.
 	var anim: String = String(ab.get("anim_charged" if charged else "anim", ""))
+	# Combo automático de la básica (petición del usuario, 2026-09-20; hoy solo el Caballero): campos
+	# PROPIOS ("combo_anim"/"combo_adur", no "anim_charged"/"adur_charged") para no tocar la velocidad
+	# del golpe normal cuando no hay combo. Se decide aquí (con la cuenta de ANTES de este golpe) y
+	# se vuelve a mirar en cast_melee cuando se resuelve: entre medias no cambia, porque mientras el
+	# preaviso está en marcha no se puede lanzar otra básica que la mueva.
+	if combo_ready(f.combo_streak, int(ab.get("combo_hits", 0))) and String(ab.get("combo_anim", "")) != "":
+		anim = String(ab["combo_anim"])
+		dur = maxf(float(ab.get("combo_adur", 0.0)), maxf(f.windup, 0.35))
+	f.cast_anim_t = dur
 	if anim == "" or f.anim == null or not f.anim.has_animation(anim):
 		anim = "Sword_Attack" if ab["k"] in ["melee", "dash"] else "Spell_Simple_Shoot"
 	main._play_all(f.anims, anim)
@@ -1111,6 +1169,14 @@ func cast_melee(f: Fighter, ab: Dictionary, at: Vector3, rad: float) -> void:
 	# El giro cargado del Rompemareas: hasta x1,9 de radio y x2,1 de daño, y a 360 grados.
 	var full: bool = bool(ab.get("charge", false)) and f.charge_mult > 1.02
 	rad *= lerpf(1.0, CHARGE_RAD, f.charge_mult - 1.0) if full else 1.0
+	# Combo automático (petición del usuario, 2026-09-20; hoy solo el Caballero): el golpe que llega
+	# con la cuenta ya al tope usa el abanico ancho de "combo_rad" en vez del normal. Se recalcula
+	# con la MISMA cuenta que start_cast miró para elegir la animación (no cambia entre medias: ver
+	# el comentario de allí).
+	var combo_needed := int(ab.get("combo_hits", 0))
+	var combo_swing := combo_ready(f.combo_streak, combo_needed)
+	if combo_swing and ab.has("combo_rad"):
+		rad = float(ab["combo_rad"]) * PX
 	var origin := f.pos()
 	var face := at - origin
 	face.y = 0.0
@@ -1142,10 +1208,17 @@ func cast_melee(f: Fighter, ab: Dictionary, at: Vector3, rad: float) -> void:
 		hits += 1
 		hurt(z, float(ab.get("dmg", 20.0)) * (lerpf(1.0, CHARGE_DMG, f.charge_mult - 1.0) if full else 1.0) * (f.basic_dmg_mult if _cast_slot == 0 else 1.0),
 			float(ab.get("stun", 0.0)), f, _cast_slot)
+	if combo_needed > 0:
+		# El golpe de combo se CONSUME al lanzarse (acierte o no); si no, un acierto suma uno y un
+		# fallo reinicia (Combat.combo_next_streak). El reloj de COMBO_WINDOW se toca solo al acertar:
+		# tick_fighter lo cuenta atrás y reinicia la cuenta si pasan 2 s sin otro acierto.
+		f.combo_streak = combo_next_streak(f.combo_streak, combo_needed, hits > 0)
+		f.combo_window_t = COMBO_WINDOW if (hits > 0 and not combo_swing) else 0.0
 	if main._args.has("meleelog"):
-		print("[GOLPE] %s: %.1f m de radio, abanico %.0f°%s, tocó a %d (el más abierto a %.0f°)" % [
+		print("[GOLPE] %s: %.1f m de radio, abanico %.0f°%s, tocó a %d (el más abierto a %.0f°)%s" % [
 			ab["n"], rad, 360.0 if full else rad_to_deg(half * 2.0),
-			" CARGADO" if full else "", hits, rad_to_deg(widest)])
+			" CARGADO" if full else "", hits, rad_to_deg(widest),
+			" COMBO" if combo_swing else (" combo %d/%d" % [f.combo_streak, combo_needed] if combo_needed > 0 else "")])
 
 
 func cast_dash(f: Fighter, ab: Dictionary, at: Vector3, rad: float) -> void:
