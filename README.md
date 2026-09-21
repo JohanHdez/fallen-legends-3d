@@ -140,7 +140,8 @@ Reglas por equipos (a petición del usuario, 2026-09-16):
     vuelven de uno en uno. Se pueden soltar seguidos y luego hay que esperar, así que fallar cuesta.
     Se ve en tres segmentos naranjas bajo tu vida y en arcos alrededor del botón de ataque; sin
     munición suena a hueco y la barra parpadea. Solo ves la tuya. Las **tácticas con cargas**
-    (Trampa eléctrica, Alzar esqueleto, Baliza Nox: 3 cada una) enseñan lo mismo en su botón con
+    (Trampa eléctrica, Alzar esqueleto, Baliza Nox, y desde 2026-09-20 Corte de hacha: 3 cada una)
+    enseñan lo mismo en su botón con
     arcos **cian**, uno por carga, creciendo el que vuelve y con los segundos que le faltan en
     pequeño; el botón solo se ensombrece cuando no queda ninguna (2026-09-18: antes se ensombrecía
     al gastar la primera y no se sabía cuántas quedaban). **La Ilusionista no tiene**: no
@@ -151,7 +152,7 @@ Reglas por equipos (a petición del usuario, 2026-09-16):
     |---|---|---|---|
     | Tormentero, Trasgo Nox, Clérigo | cada 0,6 s | 1,0 s | −40 % |
     | Rey liche | cada 0,7 s | 1,15 s | −40 % |
-    | Caballero esqueleto | cada 0,8 s | 1,0 s | −20 % |
+    | Caballero esqueleto | cada 0,65 s (antes 0,8; 2026-09-20) | 1,0 s | −35 % |
     | Rompemareas | cada 1,1 s | 1,4 s | −20 % |
     | Ilusionista | cada 0,18 s | sin límite | ×1,6 (ver abajo) |
   - **Trampa eléctrica y Baliza Nox tardan 3 s en activarse** (ver "Baliza Nox del Trasgo Nox").
@@ -394,16 +395,21 @@ conjuro para todo lo demás. Ahora:
 | Tormentero | Trampa eléctrica · Tormenta | `OverhandThrow` · `Spell_Double_Shoot` |
 | Clérigo | Sanación · Esporas | `Spell_Double_Shoot` · **`Consume`** (se bebe el frasco) |
 | Ilusionista | Pistola espectral · Fiesta de clones | **`Pistol_Shoot`** · `Spell_Double_Shoot` |
-| Caballero esqueleto | Lanzada · Corte de hacha · Muro de espinas | `Sword_Regular_A` · **`Sword_Dash`** · `OverhandThrow` |
+| Caballero esqueleto | Lanzada (· **combo**) · Corte de hacha · Muro de espinas | `Sword_Regular_A` (· **`Sword_Regular_Combo`**) · **`Sword_Dash`** · `OverhandThrow` |
 | Rompemareas | Mandoble (normal · **cargado**) · Enganche · Ancla clavada | **`Sword_Regular_C`** · **`Sword_Regular_Combo`** · `OverhandThrow` · `Sword_Regular_B` |
 | Rey liche | Alzar esqueleto · Alzar ejército · dar órdenes | `Spell_Double_Shoot` · `Spell_Double_Enter` · **`Idle_Rail_Call`** |
 | Trasgo Nox | Frasco · Baliza · Granada | `OverhandThrow` (los tres, a distinta velocidad) |
 
 El campo nuevo **`anim_charged`** (con su `adur_charged`) es para el mandoble: al cargarlo sale el
-combo en vez del tajo normal. Las órdenes del Rey liche usan `Combat.gesture`, que reserva la
-animación unos segundos sin ser una habilidad. `tests/test_anim_map.gd` carga las dos bibliotecas de
-verdad y falla si una habilidad pide una animación que no existe, que no está injertada o que sale
-fuera de 0,4-3× al estirarla al preaviso.
+combo en vez del tajo normal. La Lanzada del Caballero (2026-09-20) usa el mismo `Sword_Regular_Combo`
+pero con campos PROPIOS, **`combo_anim`/`combo_adur`** (no `anim_charged`/`adur_charged`: esos son del
+mandoble cargado y habrían alargado también el golpe normal): el golpe normal dura 0,35 s (sale a
+1,2×) y el de combo 1,2 s (sale a 2,5×, sobre los 3,0 s reales de `Sword_Regular_Combo`). Las órdenes
+del Rey liche usan `Combat.gesture`, que reserva la animación unos segundos sin ser una habilidad.
+`tests/test_anim_map.gd` carga las dos bibliotecas de verdad y falla si una habilidad pide una
+animación que no existe, que no está injertada, o que sale fuera de 0,4-3× al estirarla a SU propia
+duración (`adur`, `adur_charged` o `combo_adur`, cada campo con la suya: antes de 2026-09-20 esta
+prueba medía `anim_charged` con `adur` por error, y le colaba al mandoble cargado un 3,0× pelado).
 
 `Roll`, `OverhandThrow`, `Sword_Regular_A/B` y `Shield_Dash` estaban en el pack sin que las usara
 nadie. Cada habilidad puede pedir la suya con `"anim"`, y hay dos ajustes de tiempo:
@@ -611,6 +617,10 @@ daño deben aumentar". Antes la carga llevaba `"sync"`: duraba **lo que la anima
 - **radio 130 px (2,0 m)** en vez de 70 (1,1 m) y **32 de daño** en vez de 25;
 - **la carga le quita la ralentización** (`slow_t = 0`): con el gas Nox encima o dentro de la zona era
   todavía más lenta, justo cuando la quieres para salir de ahí.
+- **tres cargas** (petición del usuario, 2026-09-20, "permitir tener 3 oportunidades"): `"chg": 3`,
+  el mismo sistema que Alzar esqueleto (Rey liche) y las trampas; el HUD táctil ya pinta un arco por
+  carga. Guarda hasta tres embestidas: encadena dos para alcanzar a alguien y deja la tercera para
+  escapar, que es justo lo que pidió el usuario la vez anterior.
 
 ## Guardia del Caballero
 
@@ -620,6 +630,53 @@ en el suelo"). Una esfera translúcida a secas se ve como un disco plano que tap
 el brillo va por **fresnel** en un shader de cuatro líneas: enciende el borde y deja el centro casi
 transparente, que es lo que la lee como cascarón. El `Shader` se guarda en `_bubble_sh` y se
 reutiliza: compilarlo por burbuja cuesta y se filtra, y la guardia se enciende y apaga sin parar.
+
+## Aguante, básica más rápida y combo del Caballero (2026-09-20)
+
+Era la leyenda más floja en duelos (**33 %**, empatada con el Trasgo Nox): la vida más alta (380) y
+la velocidad más baja (200) dicen que su papel es aguantar y llegar, y no llegaba. Petición del
+usuario: "la habilidad de corte de hacha permitir tener 3 oportunidades [arriba], hacerlo más
+resistente al golpe cuerpo a cuerpo y permitir pegar más rápido (podríamos considerar agregarle la
+animación de golpes consecutivos que tenemos, que se active automáticamente después de hacer varios
+golpes básicos)". Diseño completo: `docs/superpowers/specs/2026-09-20-caballero-esqueleto-design.md`.
+
+- **Aguante al cuerpo a cuerpo**: campo `"melee_armor": 0.25` en la LEYENDA (`data/legend_data.gd`),
+  no en la habilidad: 25 % menos de daño cuando el golpe viene de una habilidad `k = "melee"` o
+  `"dash"` (`Combat.melee_armor_mult`, aplicado en `Combat.hurt` antes de tocar la vida). Uno a
+  distancia no se reduce. **Se acumula con la Guardia** (arriba, `GUARD_DAMAGE_MULT` 0,55): quieto y
+  cubriéndose, un hachazo le hace 0,55 × 0,75 = **41 %** del daño.
+- **Básica más rápida**: Lanzada, recarga 0,8 → **0,65 s** (sube el daño sostenido sin munición un
+  23 %). La munición por equipos NO se toca (sigue en 3 disparos, uno cada 1,0 s: tabla de arriba):
+  el hueco es mayor en el cuerpo a cuerpo corto, que es donde tenía que ganar, no en el desgaste a
+  distancia.
+- **Combo automático**: dos golpes de la básica que ACIERTAN en menos de 2 s (`Combat.COMBO_WINDOW`)
+  hacen que el tercero salga con `Sword_Regular_Combo` (la anima el Rompemareas al cargar el
+  mandoble, arriba) y un abanico más ancho (115 → **150 px**); campos `"combo_hits"`, `"combo_rad"`,
+  `"combo_anim"`, `"combo_adur"` en la Lanzada. Fallar un golpe o pasar los 2 s reinicia la cuenta a
+  cero; el propio golpe de combo se consume al lanzarse, acierte o no, así que no se encadenan dos
+  combos seguidos. **No sube el daño**: primero se midió solo con el arco más ancho, y bastó.
+
+Medido con el método del repo (`--mode=1v1 --legend=3 --foe=N --autoplay --seed=1..6`, las otras seis
+leyendas, 36 duelos, antes y después de los cuatro cambios; **antes** de tocar nada, para no tener
+que revertir):
+
+| Rival | antes | después |
+|---|---|---|
+| Tormentero | 0/6 | 1/6 |
+| Clérigo | 1/6 | 5/6 |
+| Ilusionista | 0/6 | 2/6 |
+| Rompemareas | 4/6 | 6/6 |
+| Rey liche | 0/6 | 4/6 |
+| Trasgo Nox | 2/6 | 1/6 |
+| **Total** | **7/36 (19 %)** | **19/36 (53 %)** |
+
+Deja de ser la peor sin pasarse del 65 % que marcaba el diseño (si lo hubiera pasado, tocaba bajar
+primero el aguante y luego la básica, y volver a medir): no hizo falta ninguna segunda pasada de
+daño en el combo. Sigue floja contra quien pelea a distancia y no se deja alcanzar (Tormentero,
+Ilusionista): el aguante y el combo solo ayudan cuando el golpe llega. Contra el Rompemareas y el
+Rey liche, los dos que también reparten cuerpo a cuerpo o se quedan quietos invocando, la mejora es
+enorme. Esta tabla es la referencia hoy; la de la sección "Balance" de arriba (42/28 duelos,
+2026-09-18) es de antes de estos cuatro cambios y no se ha vuelto a correr entera con ellos puestos.
 
 ## Gas demoníaco: la zona que se cierra
 
@@ -839,17 +896,36 @@ sigue en la sala.
   de su variable `PORT`. `.dockerignore` deja fuera `models/` (175 MB de glTF que el servidor de la
   fase 1 no carga: con `--server`, `main.gd` sale antes de construir nada); **la fase 2 los volverá
   a necesitar**.
-- Protocolo `NetService.PROTOCOL` = 100: un cliente con otra versión es rechazado con el motivo
-  (el 2D va por 3, así que un cliente del 2D no entra aquí por error).
+- Protocolo `NetService.PROTOCOL` = 102 (100 → 101 en la fase 2, tarea 3, por los mensajes nuevos de
+  control y lanzamiento; 101 → 102 el 2026-09-20, cuando el encabezado de la foto creció con tu
+  munición y la carga de tu definitiva): un cliente con otra versión es rechazado con el motivo (el
+  2D va por 3, así que un cliente del 2D no entra aquí por error). **Al subir el protocolo hay que
+  redesplegar el servidor de Railway con el mismo commit que el APK**, o ninguno de los dos entra.
+- **Tu munición y la carga de tu definitiva viajan en la foto** (3 bytes en el encabezado, que ya va
+  uno por jugador: 115 → 118 bytes con 8 leyendas). El cliente NO las cuenta por su cuenta a
+  propósito: gastar un disparo lo decide el servidor, así que la barra enseña los disparos que le
+  quedan a la leyenda de verdad, con 50 ms de retraso, en vez de una cuenta propia que puede no
+  coincidir. Antes la barra se quedaba llena para siempre y el botón seguía pintando su ciclo de
+  recarga mientras el servidor ya no disparaba nada (2026-09-20).
+- **La pausa (☰ y la tecla P) existe también en una partida en red**, pero no para el mundo: el
+  servidor sigue simulando y los demás jugando. Ofrece Seguir y **Salir de la partida** (no
+  "Reiniciar": la partida es de todos), corta la entrada del juego mientras está abierta —y suelta el
+  joystick que tuvieras puesto, o te vas corriendo mientras miras el menú—, y al salir suelta la
+  conexión y vuelve al menú de inicio. Hasta el 2026-09-20
+  no se creaba en línea y en el móvil no había forma de salir salvo matar la aplicación.
 - **Entras con la leyenda que elegiste en el menú**: al registrarte, el servidor te da una libre sin
   saber cuál querías, así que el cliente se la pide nada más entrar. Si ya la lleva un compañero, el
   servidor lo rechaza y te quedas con la que te tocó (2026-09-20).
 - El identificador de dispositivo (`net/identity.gd`) **no se difunde nunca**: el servidor lo guarda
   para sí y a los demás solo les llega el apodo, numerado si se repite ("Kael 2").
-- Prueba: `tools/net_check.sh` (dentro de `tools/check.sh`) arranca un servidor y tres clientes sin
-  pantalla: dos entran por el menú, eligen, se ponen listos y el líder inicia un 3v3; el tercero
-  tiene otra versión y el servidor lo echa. Si el puerto está ocupado, la prueba **falla y lo dice**
-  en vez de probar contra un servidor viejo (2026-09-18).
+- Prueba: `tools/net_check.sh` (dentro de `tools/check.sh`) arranca un servidor y siete clientes sin
+  pantalla. De la sala: dos entran por el menú, eligen, se ponen listos y el líder inicia un 3v3, y
+  un tercero tiene otra versión y el servidor lo echa. De la partida: uno se mueve de verdad por la
+  red, otro repite lo mismo con `--lag=150` (fotos retrasadas a propósito) y vigila que la predicción
+  no dé tirones ni se quede por detrás, otro juega con el dedo (joystick y botón de verdad) y
+  comprueba que la munición del HUD baja porque lo dice el servidor, y el último pulsa "Salir de la
+  partida" en el menú de pausa. Si el puerto está ocupado, la prueba **falla y lo dice** en vez de
+  probar contra un servidor viejo (2026-09-18).
 
 ## Opciones útiles para probar
 

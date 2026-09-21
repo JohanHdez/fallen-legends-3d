@@ -20,8 +20,11 @@ const MAP_MAX := 200.0
 const INPUT_SIZE := 8
 
 ## Encabezado de una foto: t (float) + ack (u32) + zone (float) + clock (float) + round (u8) +
-## número de leyendas (u8) + número de criaturas (u8).
-const SNAPSHOT_HEADER_SIZE := 19
+## número de leyendas (u8) + número de criaturas (u8), más los tres bytes de lo TUYO (abajo).
+## Los tres van en el ENCABEZADO, no en la lista de leyendas, porque la foto ya se codifica una vez
+## por jugador (net/net_server.gd: cada uno lleva su propio `ack`): cuestan 3 bytes por foto en
+## total, no 3 por leyenda.
+const SNAPSHOT_HEADER_SIZE := 22
 ## Una leyenda: id (u16) + pos (u16×3) + yaw (u8) + anim (u8) + vida (u8) + banderas (u8).
 const ACTOR_FIGHTER_SIZE := 12
 ## Una criatura (Horda, F3): igual que una leyenda pero sin banderas (ni derribo ni marca).
@@ -101,10 +104,17 @@ static func decode_input(b: PackedByteArray) -> Dictionary:
 ## {"t", "ack", "fighters": Array, "zone", "clock", "round", "creatures": Array (opcional, F3)} ->
 ## bytes. Cada leyenda: {"id", "pos": Vector3, "yaw", "anim": int, "hp", "downed", "marked"}; cada
 ## criatura, lo mismo sin "downed" ni "marked".
+## "ammo" (disparos enteros), "ammo_t" (0..1, lo que falta para que vuelva el siguiente) y
+## "ult_charge" (0..1) son de QUIEN RECIBE la foto, no de una leyenda de la lista: son lo único de
+## su ficha que el cliente no puede predecir solo -gastar munición y cargar la definitiva los decide
+## el servidor, no el botón-, así que sin ellos el HUD del cliente mentía (2026-09-20).
 static func encode_snapshot(d: Dictionary) -> PackedByteArray:
 	var buf := StreamPeerBuffer.new()
 	buf.put_float(float(d.get("t", 0.0)))
 	buf.put_u32(maxi(int(d.get("ack", 0)), 0))
+	buf.put_u8(clampi(int(d.get("ammo", 0)), 0, 255))
+	buf.put_u8(_frac_to_u8(float(d.get("ammo_t", 0.0))))
+	buf.put_u8(_frac_to_u8(float(d.get("ult_charge", 0.0))))
 	buf.put_float(float(d.get("zone", 0.0)))
 	buf.put_float(float(d.get("clock", 0.0)))
 	buf.put_u8(clampi(int(d.get("round", 0)), 0, 255))
@@ -132,6 +142,9 @@ static func decode_snapshot(b: PackedByteArray) -> Dictionary:
 		return {}
 	var t := buf.get_float()
 	var ack := buf.get_u32()
+	var ammo := buf.get_u8()
+	var ammo_t := _u8_to_frac(buf.get_u8())
+	var ult_charge := _u8_to_frac(buf.get_u8())
 	var zone := buf.get_float()
 	var clock := buf.get_float()
 	var round_n := buf.get_u8()
@@ -149,7 +162,8 @@ static func decode_snapshot(b: PackedByteArray) -> Dictionary:
 	for i in nc:
 		creatures[i] = _get_actor(buf, false)
 	return {"t": t, "ack": ack, "fighters": fighters, "zone": zone, "clock": clock,
-		"round": round_n, "creatures": creatures}
+		"round": round_n, "creatures": creatures,
+		"ammo": ammo, "ammo_t": ammo_t, "ult_charge": ult_charge}
 
 
 static func _put_actor(buf: StreamPeerBuffer, a: Dictionary, with_flags: bool) -> void:

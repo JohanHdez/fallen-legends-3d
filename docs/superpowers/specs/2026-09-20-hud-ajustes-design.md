@@ -53,7 +53,20 @@ nuevas, sino sacar las dos que ya existen a piezas compartidas y ponerlas en los
    suena. Las pistas se listan **leyendo la carpeta** `assets/audio/music/`, no una lista escrita a
    mano: si el usuario mete otro mp3, aparece solo. La pista del jefe sigue teniendo prioridad
    mientras hay jefe (es información de juego, no gusto musical), y al acabar vuelve a la elegida.
-8. **Nada de esto cambia el balance ni el determinismo**: son HUD y ajustes. Las trazas
+8. **Vibración al golpear** (petición del usuario, 2026-09-20: "veo que eso mejora la experiencia de
+   juego"). En el móvil, un tirón corto cuando **tú** das un golpe y otro, distinto, cuando **te**
+   dan. Tres cuidados, que son los que deciden si molesta o gusta:
+   - **Solo lo tuyo.** Vibrar con cada golpe de la partida (ocho leyendas, cuarenta criaturas) sería
+     un zumbido continuo. Se vibra por el daño que da o recibe `main.pf`, y nada más.
+   - **Con tope.** Un mínimo entre tirones (~60 ms) para que una ráfaga de básica no se convierta en
+     vibración continua; y más largo al caer derribado o morir, que sí son momentos que merecen
+     distinguirse. Los golpes que no te llegan (fallos, daño a un señuelo) no vibran.
+   - **Se puede apagar**, en la misma pantalla de ajustes que el audio, y **la vibración es lo
+     primero que se apaga** cuando alguien se queja de batería.
+   Va en el HUD, no en el combate: el punto donde `main` ya sabe que `pf` recibió o repartió daño.
+   **El APK necesitará el permiso `VIBRATE`** (hoy solo pide `INTERNET`): se añade cuando esto se
+   implemente, no antes, y se dice en el README.
+9. **Nada de esto cambia el balance ni el determinismo**: son HUD y ajustes. Las trazas
    deterministas tienen que seguir idénticas, y eso se comprueba.
 
 ## Cómo se sabe que está
@@ -75,7 +88,8 @@ aparato).
 ## Orden de trabajo
 
 1. `KillFeed` y `TeamPanel` extraídos, PvP idéntico. 2. Registro en Horda. 3. Panel en PvP.
-4. `Settings` + pantalla de ajustes con audio. 5. Colocación de controles. 6. Iconos, cuando lleguen.
+4. `Settings` + pantalla de ajustes con audio **y vibración**. 5. Vibración al golpear (va con su
+ajuste, no antes). 6. Colocación de controles. 7. Iconos, cuando lleguen.
 
 Va **después de las fases 0 y 2 del juego en línea** (decisión del usuario, 2026-09-20: "me gusta,
 aprobado, pero primero termina la fase 2 del en línea para probarlo"). Dos razones y las dos son

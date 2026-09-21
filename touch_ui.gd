@@ -22,6 +22,10 @@ var main: Node = null
 func _draw() -> void:
 	if main == null:
 		return
+	# En línea (tarea 5b), los primeros ~100 ms de partida: todavía no ha llegado la primera foto
+	# con tu id, así que `net_client.predicted` -y con él `main._abil`, `main.cooldown_*`…- no existe.
+	if main.net_client != null and main.net_client.predicted == null:
+		return
 	var font := ThemeDB.fallback_font
 	# Joystick: base fija y pomo que sigue al dedo, igual que en el juego.
 	var jc: Vector2 = main.input.joy_center()
@@ -47,6 +51,11 @@ func _draw() -> void:
 func _ability(b: Dictionary, font: Font) -> void:
 	var i: int = b["idx"]
 	var c: Vector2 = b["c"]
+	# TU leyenda: sin conexión `pf`; en línea la predicha (main.hud_fighter). Antes esto miraba
+	# `main.pf` a secas, que en línea es null SIEMPRE: los arcos de munición y de cargas no se
+	# dibujaban nunca, y el botón de la básica pintaba su ciclo como si tuviera balas infinitas
+	# (revisión de la tarea 5b, 2026-09-20).
+	var me: Fighter = main.hud_fighter()
 	var pressed: bool = main.input._aim_btn == i
 	var r: float = b["r"] * (1.06 if pressed else 1.0)
 	var ready: bool = main._ability_ready(i)
@@ -71,16 +80,16 @@ func _ability(b: Dictionary, font: Font) -> void:
 
 	var frac: float = main.cooldown_fraction(i)
 	var maxc := int(main._abil(i).get("chg", 0))
-	if maxc > 0 and not swap and main.pf != null:
-		_charges(c, r, i, maxc, font)
+	if maxc > 0 and not swap:
+		_charges(c, r, i, maxc, font, me)
 	elif frac > 0.0 and not swap:
 		_sector(c, r * 0.92, frac, Color(0, 0, 0, 0.55))
 		_center_text(c, main.cooldown_text(i), font)   # segundos, o "73%" si la definitiva va por carga
 
 	# Munición de la básica por equipos: un arco por disparo alrededor del botón, como la barra
 	# que va debajo de tu vida.
-	if i == 0 and main.pf != null and main.pf.ammo_max > 0:
-		_ammo_arcs(c, r + 7.0, main.pf.ammo_max, main.pf.ammo_level())
+	if i == 0 and me.ammo_max > 0:
+		_ammo_arcs(c, r + 7.0, me.ammo_max, me.ammo_level())
 
 	# Apuntado a mano: anillo de alcance y el icono desplazado hacia donde caerá.
 	if pressed and main.input._aim_drag.length() >= main.input.AIM_DEAD:
@@ -175,13 +184,13 @@ func _ammo_arcs(center: Vector2, radius: float, n: int, level: float,
 ## del botón, lleno si se puede lanzar y creciendo el que vuelve, y los segundos que le faltan
 ## (petición del usuario, 2026-09-18). Antes el botón se ensombrecía nada más gastar una aunque
 ## quedaran dos, y el "2/3" solo salía con todas llenas: no se sabía cuántas quedaban.
-func _charges(c: Vector2, r: float, i: int, maxc: int, font: Font) -> void:
-	_ammo_arcs(c, r + 7.0, maxc, main.pf.charge_level(i), CHG_FULL, CHG_PART)
-	var left: float = main.pf.cooldown_left(i)
+func _charges(c: Vector2, r: float, i: int, maxc: int, font: Font, me: Fighter) -> void:
+	_ammo_arcs(c, r + 7.0, maxc, me.charge_level(i), CHG_FULL, CHG_PART)
+	var left: float = me.cooldown_left(i)
 	if left <= 0.0:
 		return
 	var secs := "%.1f" % left
-	if int(main._chg[i]) == 0:
+	if me.chg[i] == 0:
 		# Sin ninguna: sombra y segundos en grande, como una recarga normal.
 		_sector(c, r * 0.92, main.cooldown_fraction(i), Color(0, 0, 0, 0.55))
 		_center_text(c, secs, font)

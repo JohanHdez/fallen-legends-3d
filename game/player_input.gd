@@ -40,6 +40,33 @@ var _look_idx := -1
 var _aim_btn := -1
 var _aim_drag := Vector2.ZERO
 var _aim_idx := -1
+## La pausa abierta EN LÍNEA (ui/pause_menu.gd): ahí el árbol NO se pausa a propósito -el servidor
+## sigue simulando y los demás jugando-, así que la entrada hay que cortarla aquí. Y hay que
+## cortarla aquí y no dejando que el menú se coma los toques: el joystick se lee en `_input()`, que
+## corre ANTES del GUI, así que un Control por encima no lo tapa por mucho `mouse_filter` que lleve.
+var blocked := false
+
+
+## Suelta lo que el dedo tuviera puesto. Al abrir la pausa en línea: si no, el joystick se queda
+## clavado en el último valor que leyó -`_input` deja de actualizarlo, pero `NetClient` lo sigue
+## leyendo cada fotograma- y tu leyenda se va corriendo sola mientras miras el menú.
+func release_touch() -> void:
+	_joy_idx = -1
+	_joy_vec = Vector2.ZERO
+	_look_idx = -1
+	_aim_btn = -1
+	_aim_idx = -1
+	_aim_drag = Vector2.ZERO
+	_preview = -1
+
+
+## Con quién habla: sin conexión, `main.pf` ya existe desde `_ready`; con partida en línea (tarea
+## 5b) `pf` NO existe nunca a propósito (así `main._physics_process`, que simularía la partida por su
+## cuenta, se sigue saltando entero: `player == null`) y la leyenda de verdad es la predicha de
+## net/net_client.gd, que tarda ~100 ms en nacer (la primera foto del servidor con tu id). Null
+## mientras tanto: quien llame a esto tiene que dejar pasar el toque/la tecla sin apuntar ni lanzar.
+func _fighter() -> Fighter:
+	return main.net_client.predicted if main.net_client != null else main.pf
 
 
 func _setup_touch() -> void:
@@ -98,7 +125,7 @@ func _drag_point(rng_m: float) -> Vector3:
 	var fwd := Vector3(-basis.z.x, 0, -basis.z.z).normalized()
 	var right := Vector3(basis.x.x, 0, basis.x.z).normalized()
 	var dir := (right * _aim_drag.x - fwd * _aim_drag.y).normalized()
-	var at := main.player.global_position + dir * (rng_m * f)
+	var at := _fighter().body.global_position + dir * (rng_m * f)
 	at.y = 0.0
 	return at
 
@@ -121,7 +148,9 @@ func _button_at(p: Vector2) -> int:
 func _input(e: InputEvent) -> void:
 	if not main.touch or main.touch_ui == null:
 		return
-	if main._frozen():
+	if main._frozen() or blocked:
+		return
+	if _fighter() == null:      # en línea, antes de la primera foto con tu id (tarea 5b)
 		return
 	if e is InputEventScreenTouch:
 		var t := e as InputEventScreenTouch
@@ -204,13 +233,14 @@ func _build_aim() -> void:
 func _aim_point(max_range: float) -> Vector3:
 	var origin := main.cam.global_position
 	var dir := -main.cam.global_transform.basis.z
-	var p := main.player.global_position
+	var body_pos := _fighter().body.global_position
+	var p := body_pos
 	if dir.y < -0.01:
 		p = origin + dir * (-origin.y / dir.y)
 	else:
-		p = main.player.global_position + Vector3(dir.x, 0, dir.z).normalized() * max_range
+		p = body_pos + Vector3(dir.x, 0, dir.z).normalized() * max_range
 	p.y = 0.0
-	var from := main.player.global_position
+	var from := body_pos
 	from.y = 0.0
 	var off := p - from
 	if off.length() > max_range:
@@ -227,7 +257,7 @@ func _aim_point_touch(idx: int) -> Vector3:
 	var fwd := Vector3(-basis.z.x, 0, -basis.z.z).normalized()
 	var right := Vector3(basis.x.x, 0, basis.x.z).normalized()
 	var dir := (right * _aim_drag.x - fwd * _aim_drag.y).normalized()
-	var at := main.player.global_position + dir * (main._ability_range(idx) * f)
+	var at := _fighter().body.global_position + dir * (main._ability_range(idx) * f)
 	at.y = 0.0
 	return at
 
@@ -235,27 +265,43 @@ func _aim_point_touch(idx: int) -> Vector3:
 ## Toque sin arrastre: al enemigo más cercano dentro del alcance; si no, al frente.
 func _auto_aim(i: int) -> Vector3:
 	var rng_m := main._ability_range(i)
-	var near := main.combat.foes_in(main.pf.team, main.player.global_position, rng_m, 1, true)
+	var me := _fighter()
+	var near := main.combat.foes_in(me.team, me.body.global_position, rng_m, 1, true)
 	if not near.is_empty():
 		var p: Vector3 = near[0]["node"].global_position
 		p.y = 0.0
 		return p
-	var f := Vector3(sin(main.player_model.rotation.y), 0, cos(main.player_model.rotation.y))
-	return main.player.global_position + f * rng_m * 0.7
+	var fwd := Vector3(sin(me.model.rotation.y), 0, cos(me.model.rotation.y))
+	return me.body.global_position + fwd * rng_m * 0.7
 
 
 ## Tu lanzamiento: intercambio con el señuelo si toca, y si no, al punto que marque la mira (ratón)
-## o al enemigo más cercano (toque sin arrastre).
+## o al enemigo más cercano (toque sin arrastre). En línea (tarea 5b) esto NUNCA decide si el
+## lanzamiento vale: solo manda la petición (`NetClient.request_cast`) y es el servidor quien
+## comprueba recarga, munición y alcance con las reglas de siempre (net/net_server.gd, on_cast).
 func _try_cast(i: int, at := Vector3.INF) -> void:
-	if main.combat.try_swap(main.pf, i):
+	var f := _fighter()
+	if f == null:
 		return
-	if i == 0 and main.pf.ammo_max > 0 and main.pf.ammo <= 0 and main.team_mode != null:
-		main.team_mode.dry_fire()
-	if not main.pf.ability_ready(i):
+	# El intercambio con el señuelo del Ilusionista todavía no existe en línea (fuera de esta tarea:
+	# solo se prueba sin conexión, mejor que fingir un señuelo que el servidor no tiene).
+	if main.net_client == null and main.combat.try_swap(f, i):
+		return
+	if i == 0 and f.ammo_max > 0 and f.ammo <= 0:
+		# Sin munición: parpadeo rojo y sonido a hueco. En línea la barra la lleva el cliente, no
+		# TeamMode (que ahí no existe): sin esta rama el arma dejaba de disparar en silencio.
+		if main.net_client != null:
+			main.net_client.dry_fire()
+		elif main.team_mode != null:
+			main.team_mode.dry_fire()
+	if not f.ability_ready(i):
 		return
 	if at == Vector3.INF:
-		at = _auto_aim(i) if main.touch else _aim_point(main.pf.ability_range(i))
-	main.combat.start_cast(main.pf, i, at)
+		at = _auto_aim(i) if main.touch else _aim_point(f.ability_range(i))
+	if main.net_client != null:
+		main.net_client.request_cast(i, at)
+	else:
+		main.combat.start_cast(f, i, at)
 
 
 ## Solo para pruebas headless: lanza lo que esté listo hacia el enemigo más cercano.
@@ -277,9 +323,9 @@ func _auto_cast() -> void:
 
 
 func _unhandled_input(e: InputEvent) -> void:
-	if main._mode == "menu" or main.player == null:
+	if main._mode == "menu" or _fighter() == null:
 		return
-	if main._frozen():
+	if main._frozen() or blocked:
 		return
 	if e is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var mm := e as InputEventMouseMotion
@@ -319,10 +365,12 @@ func _unhandled_input(e: InputEvent) -> void:
 					if main._has_minions():
 						main._orders_hold = 0.0
 				KEY_TAB:
-					if main.team_mode == null and main._horde_team_size() == 1:   # con equipo, la de la partida
+					# En línea la leyenda la fija el reparto de la sala, no se cambia en caliente
+					# (y main.pf ni existe: main.switch_legend() reventaría contra él).
+					if main.net_client == null and main.team_mode == null and main._horde_team_size() == 1:
 						main.switch_legend(1)
 				KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7:
-					if main.team_mode == null and main._horde_team_size() == 1:
+					if main.net_client == null and main.team_mode == null and main._horde_team_size() == 1:
 						main.switch_legend(k.physical_keycode - KEY_1 - main._legend)
 				KEY_F10:
 					get_tree().quit()

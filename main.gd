@@ -175,6 +175,7 @@ var combat: Combat                # habilidades, daño y leyendas (game/combat.g
 var pf: Fighter = null            # tu leyenda (combat.fighters[0])
 var _mode := "horda"              # "menu", "horda", "1v1", "2v2", "3v3" o "4v4" (GameModes)
 var team_mode: TeamMode = null    # partida por equipos (null en la Horda y en el menú)
+var net_client: NetClient = null  # cliente del juego en línea (tarea 4): pinta, no simula ni crea team_mode
 var nav: NavGrid = null           # navegación de los bots
 
 # Alias de tu leyenda, para que la cámara, el control y el HUD se lean como antes.
@@ -267,8 +268,12 @@ var input: PlayerInput = null     # teclado, ratón, táctil y apuntado: game/pl
 
 func _ready() -> void:
 	_collect_args()
-	# Servidor dedicado del juego en línea (fase 1): no monta mapa, cámara ni HUD; la sala la lleva
-	# el autoload Net. En la fase 2 montará aquí la partida en línea.
+	# Servidor dedicado del juego en línea: sin partida en marcha no monta mapa, cámara ni HUD (la
+	# sala la lleva el autoload Net); en cuanto el líder pulsa Iniciar, Net._request_start recarga
+	# esta escena con el reparto que guardó en NetServer, y entonces SÍ se construye el mundo, igual
+	# que cualquier partida headless (--autoplay ya prueba justo este camino en las sondas). El
+	# proceso de Main se apaga siempre: sin cámara que seguir ni HUD que pintar, es NetServer quien
+	# lleva el tick (fase 2: docs/superpowers/specs/2026-09-18-juego-en-linea-design.md).
 	if _args.has("server"):
 		set_process(false)
 		set_physics_process(false)
@@ -277,7 +282,8 @@ func _ready() -> void:
 		# PlayerInput) nunca se crea con --server, así que no hay entrada que procesar de todos modos.
 		set_process_input(false)
 		set_process_unhandled_input(false)
-		return
+		if not NetService.node().server.has_match():
+			return
 	# `is_touchscreen_available()` devuelve true en cualquier escritorio porque project.godot activa
 	# `emulate_touch_from_mouse` (para probar el táctil con el ratón): el Mac arrancaba SIEMPRE en
 	# modo móvil, con joystick en pantalla, sin capturar el ratón, sin sombras y en la oleada 2. La
@@ -285,6 +291,10 @@ func _ready() -> void:
 	var real_touchscreen := DisplayServer.is_touchscreen_available() and not Input.is_emulating_touch_from_mouse()
 	touch = OS.has_feature("mobile") or OS.has_feature("web_ios") or OS.has_feature("web_android") \
 		or real_touchscreen or _args.has("touch")
+	# Solo pinta (tarea 4). `has_match()`: el cliente sobrevive a la partida (cuelga del autoload) y
+	# tras salir de una sigue ahí, parado; sin eso `_pick_mode` volvería a entrar en la abandonada.
+	var nc := NetService.node().client
+	net_client = nc if nc != null and nc.has_match() and not _args.has("server") else null
 	_mode = _pick_mode()
 	if touch:
 		# El S24 Ultra y compañía van a 120 Hz: sin tope, el juego intenta 120 y se le nota el tirón
@@ -333,7 +343,10 @@ func _ready() -> void:
 		_scatter_decor()
 	_build_graves(m)
 	_build_collision()
-	_spawn_player()
+	if net_client != null:
+		_build_camera_rig()
+	else:
+		_spawn_player()
 	if _mode == "horda" and _horde_team_size() == 1:
 		_spawn_companions()        # estatuas de ambiente; con compañeros de verdad sobran
 	_build_hud()
@@ -346,39 +359,48 @@ func _ready() -> void:
 	if _mode == "menu":
 		_setup_menu()
 	elif GameModes.is_pvp(_mode):
-		team_mode = TeamMode.new(self)
-		team_mode.setup(_mode)
+		if net_client != null:
+			net_client.attach(self)   # no crea leyendas ni bots: solo pinta (tarea 4)
+		else:
+			team_mode = TeamMode.new(self)
+			# Servidor dedicado con partida en marcha: el reparto lo manda la sala (NetServer.roster), no
+			# se sortea. Horda en línea llega en la fase 3; con --server ese modo sigue el camino de
+			# siempre (bots sorteados), a la espera de HordeMode.setup_from_roster.
+			var srv := NetService.node().server if _args.has("server") else null
+			if srv != null and srv.has_match():
+				team_mode.setup_from_roster(_mode, srv.roster)
+			else:
+				team_mode.setup(_mode)
 	else:
+		# LobbyRules.can_start() ya rechaza "Iniciar" en Horda desde un servidor dedicado (tarea 3):
+		# este camino nunca debería ver _mode == "horda" con una partida de sala en marcha.
 		horde_mode = HordeMode.new(self)
 		horde_mode.setup(_horde_team_size())
 		horde = Horde.new(self)
 		horde.setup()
 	# La entrada del jugador (teclado, ratón, táctil, apuntado): game/player_input.gd. Se crea aquí,
 	# antes de _build_aim (que main.gd llamaba SIEMPRE, incluso en el menú, así que input tiene que
-	# existir ya, no solo a partir de donde antes se llamaba _setup_touch).
+	# existir ya, no solo a partir de donde antes se llamaba _setup_touch); también en línea (tarea 5b).
 	input = PlayerInput.new()
 	input.main = self
 	add_child(input)
 	input._build_aim()
-	if _mode != "menu" and team_mode == null:
+	if _mode != "menu" and team_mode == null and net_client == null:
 		reset_abilities()
 	_setup_music()
 	if _mode != "menu":
-		input._setup_touch()
-		# Minimapa arriba a la derecha (petición del usuario), por debajo de la pausa.
+		input._setup_touch()   # el joystick y los botones: también en línea (tarea 5b)
+	if _mode != "menu":
+		PauseMenu.install(self)   # ☰ y P: TAMBIÉN en línea (si no, en móvil no hay forma de salir)
+	if _mode != "menu" and net_client == null:
+		# Minimapa arriba a la derecha (petición del usuario), por debajo de la pausa. En línea no:
+		# dibuja `combat.fighters`, y el cliente no los tiene (los suyos los pinta NetView).
 		var map_layer := CanvasLayer.new()
 		map_layer.layer = 14
 		add_child(map_layer)
 		minimap = Minimap.new()
 		map_layer.add_child(minimap)
 		minimap.setup(self)
-		# Pausa con Seguir / Reiniciar / Menú: por encima del táctil, para que el botón se pueda pulsar.
-		var pause_layer := CanvasLayer.new()
-		pause_layer.layer = 40
-		add_child(pause_layer)
-		var pause := PauseMenu.new()
-		pause_layer.add_child(pause)
-		pause.setup(self)
 	_apply_cam_args()
 	if _shot == "" and not touch and _mode != "menu":
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -392,6 +414,10 @@ func _ready() -> void:
 			get_tree().quit(2)
 		else:
 			add_child(probe_script.new())
+	if _args.has("server"):
+		# El mundo ya está construido (con el reparto de NetServer, si lo hay): a partir de aquí es
+		# NetServer quien lleva el tick, porque el de Main está apagado.
+		NetService.node().server.attach(self)
 
 
 ## Opciones de línea de comandos, para sacar vistas sin tener que jugar:
@@ -1444,6 +1470,11 @@ func _all_of_class(root: Node, cls: String, acc: Array) -> void:
 func _spawn_player() -> void:
 	var c := _spawn_cell()
 	pf = combat.spawn_fighter(0, Fighter.TEAM_BLUE, true, _cell_pos(c.x, c.y) + Vector3(0, 0.2, 0))
+	_build_camera_rig()
+
+
+## Solo la cámara, sin leyenda: el cliente en línea (tarea 4) también la usa, y la sigue NetClient.
+func _build_camera_rig() -> void:
 	pivot = Node3D.new()
 	add_child(pivot)
 	spring = SpringArm3D.new()
@@ -1556,6 +1587,8 @@ func zone_active() -> bool:
 ## recargar la escena); si no, en headless o con cualquier opción de prueba la Horda de siempre
 ## (así las sondas y capturas no cambian); y si no, el menú de inicio.
 func _pick_mode() -> String:
+	if net_client != null:      # tarea 4: manda `fl_mode` (la sala), no el --mode=menu del arranque
+		return String(Engine.get_meta("fl_mode", "horda"))
 	if _args.has("mode"):
 		var m := String(_args["mode"])
 		return m if GameModes.MODES.has(m) or m == "menu" else "horda"
@@ -1588,37 +1621,43 @@ func _setup_menu() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
-# Tu leyenda vista desde el control y el HUD táctil (touch_ui.gd lee estas).
+# Tu leyenda vista desde el control y el HUD táctil (touch_ui.gd lee estas); en línea, la predicha.
+## TU leyenda para el HUD y los controles: en línea la predicha (net/net_client.gd), si no `pf`. En
+## línea es null hasta la primera foto con tu id (~100 ms): quien la use tiene que contar con eso.
+func hud_fighter() -> Fighter:
+	return net_client.predicted if net_client != null else pf
+
+
 func _abil(i: int) -> Dictionary:
-	return pf.abil(i)
+	return hud_fighter().abil(i)
 
 
 func _ability_range(i: int) -> float:
-	return pf.ability_range(i)
+	return hud_fighter().ability_range(i)
 
 
 func _ability_radius(i: int) -> float:
-	return pf.ability_radius(i)
+	return hud_fighter().ability_radius(i)
 
 
 func _ability_ready(i: int) -> bool:
-	return pf.ability_ready(i)
+	return hud_fighter().ability_ready(i)
 
 
 func swap_ready(i: int) -> bool:
-	return combat.swap_ready(pf, i)
+	return combat.swap_ready(hud_fighter(), i)
 
 
 func cooldown_left(i: int) -> float:
-	return pf.cooldown_left(i)
+	return hud_fighter().cooldown_left(i)
 
 
 func cooldown_fraction(i: int) -> float:
-	return pf.cooldown_fraction(i)
+	return hud_fighter().cooldown_fraction(i)
 
 
 func cooldown_text(i: int) -> String:
-	return pf.cooldown_text(i)
+	return hud_fighter().cooldown_text(i)
 
 
 func reset_abilities() -> void:
@@ -2524,7 +2563,7 @@ func _process(_d: float) -> void:
 			_last_anim = cur
 			cur = player_anim.current_animation
 			print("[ANIM] %s  (vel %.2f)" % [cur if cur != "" else "(ninguna)", player_anim.speed_scale])
-	if _args.has("log"):
+	if _args.has("log") and net_client == null:   # el cliente en línea no tiene pf que loguear (tarea 4)
 		_log_t -= _d
 		if _log_t <= 0.0:
 			_log_t = 1.0
@@ -2556,7 +2595,7 @@ func _process(_d: float) -> void:
 				print("sin ventana: no hay captura, pero se han corrido %s fotogramas" % _args.get("wait", "?"))
 			get_tree().quit()
 		return
-	if hud == null:
+	if hud == null or net_client != null:
 		return
 	if team_mode != null:
 		var st := "vida %d/%d" % [int(_php), int(pf.hp_max())] if pf.alive() else "CAÍDO"

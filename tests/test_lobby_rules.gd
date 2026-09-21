@@ -18,6 +18,7 @@ func _init() -> void:
 	_test_join_and_leader()
 	_test_mode_and_teams()
 	_test_ready_and_start()
+	_test_horde_online_guard()
 	_test_roster()
 	_test_sync()
 	print("test_lobby_rules: %s (%d fallos)" % ["OK" if failures == 0 else "FALLO", failures])
@@ -93,6 +94,19 @@ func _test_ready_and_start() -> void:
 	s.set_ready(3, true)
 	_check(s.can_start(1) == "", "todos listos: el líder puede empezar")
 	_check(s.can_start(2) != "", "otro que no es el líder no puede")
+
+
+## La Horda en línea es la fase 3 (tarea 3 de docs/superpowers/plans/2026-09-20-juego-en-linea-f2-partida.md):
+## hoy el servidor no la puede montar (ignoraría el reparto), así que "Iniciar" se rechaza con un
+## aviso, como cualquier otro motivo de can_start().
+func _test_horde_online_guard() -> void:
+	var s := LobbyRules.new()
+	s.add(1, "Ana")
+	s.set_mode(1, "horda")
+	_check(s.can_start(1) != "" and s.can_start(1).contains("Horda"),
+		"la Horda en línea se rechaza al iniciar (%s)" % s.can_start(1))
+	s.set_mode(1, "1v1")
+	_check(s.can_start(1) == "", "fuera de la Horda, el mismo líder sí puede iniciar")
 
 
 func _test_roster() -> void:

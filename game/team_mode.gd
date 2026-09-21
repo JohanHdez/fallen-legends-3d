@@ -86,7 +86,7 @@ func setup(p_mode: String) -> void:
 		float(main._args.get("roundtime", str(TeamMatch.ROUND_TIME))))
 	autoplay = main._args.has("autoplay")
 	revive = ReviveSystem.new(main, _respawn_point)
-	_apply_pvp_rules(pf)
+	apply_pvp_rules(pf)
 	if pf.ammo_max > 0:
 		ammo_bar = AmmoBar.new()
 		pf.body.add_child(ammo_bar)
@@ -114,6 +114,82 @@ func setup(p_mode: String) -> void:
 	hud.banner("RONDA 1")
 
 
+## Como setup(), pero el reparto (equipo, leyenda, jugador o bot) lo manda la sala en vez de
+## sortearlo: lo usa NetServer con el `roster` de LobbyRules.roster() cuando el líder pulsa Iniciar
+## (fase 2 del juego en línea). `roster[0]` es la primera plaza del equipo 1 (el líder, mientras no se
+## vaya) y pasa a ser `main.pf` (combat.fighters[0], ya creado por Main._spawn_player); el resto de
+## plazas se crean como los bots de siempre. Cada Fighter guarda su `peer` (0 = bot) para saber quién
+## la maneja: una plaza de bot (`peer == 0`) lleva BotBrain, como siempre; una plaza humana (`peer !=
+## 0`) NO lleva brain -RemoteControl (net/net_server.gd) le escribe wish/run/crouch/holding_basic
+## cuando llega su control, tarea 3 del plan F2- y move_bots/tick_brains la mueven igual mirando
+## `f.peer`, no solo `f.brain`.
+func setup_from_roster(p_mode: String, roster: Array) -> void:
+	mode = p_mode
+	size = GameModes.team_size(mode)
+	main.nav = NavGrid.new()
+	main.nav.build(main.grid)
+	if main.zone_active():
+		main._zone_r0 *= PVP_ZONE_SCALE
+		if not main._args.has("zonewait"):
+			main._zone_wait = ROUND_ZONE_WAIT
+		if not main._args.has("zonefast"):
+			main._zone_fast = ROUND_ZONE_FAST
+		main.reset_zone()
+	areas = GameModes.spawn_areas(main.grid, main.zones, area_radius(main.mw, main.mh, main.zone_active()),
+		[main.tall_grass])
+	rules = TeamMatch.new()
+	rules.setup(int(main._args.get("rounds", str(TeamMatch.ROUNDS_TO_WIN))),
+		float(main._args.get("roundtime", str(TeamMatch.ROUND_TIME))))
+	# NetServer lleva su propio tick (net/net_server.gd) y nunca pasa por Main._physics_process, que es
+	# el único sitio que lee `autoplay` para decidir si TU teclado manda: en el servidor dedicado este
+	# flag no lo mira nadie que importe. Se deja en true por si algún día algo se ejecuta por el
+	# camino normal de Main (--bench conectado a un servidor local, por ejemplo).
+	autoplay = true
+	revive = ReviveSystem.new(main, _respawn_point)
+	var slots := {1: 0, 2: 0}
+	for i in roster.size():
+		var entry: Dictionary = roster[i]
+		var team := int(entry["team"])
+		var legend := int(entry["legend"])
+		var slot := int(slots[team])
+		slots[team] = slot + 1
+		var c := _area_cell(team, slot)
+		var f: Fighter
+		if i == 0:
+			f = main.pf
+			f.team = team
+			if legend != f.legend:
+				combat.set_legend(f, legend)
+		else:
+			f = combat.spawn_fighter(legend, team, false, main._cell_pos(c.x, c.y) + Vector3(0, 0.2, 0))
+		f.peer = int(entry.get("peer", 0))
+		apply_pvp_rules(f)
+		if i == 0 and f.ammo_max > 0:
+			ammo_bar = AmmoBar.new()
+			f.body.add_child(ammo_bar)
+			# Pegada por debajo a la barra de vida, del mismo ancho.
+			ammo_bar.setup(f, combat.bar_height(f) - Main.BAR_H * 0.5 - 0.03 - AmmoBar.HEIGHT * 0.5, Main.BAR_W)
+		# Plaza de bot: BotBrain, como siempre. Plaza humana: nadie -RemoteControl no es un "brain",
+		# escribe directamente sobre el Fighter cuando llega su control (net/net_server.gd, on_input)-,
+		# igual que Fighter.brain se queda a null para tu propia leyenda en una partida sin conexión.
+		if f.peer == 0:
+			f.brain = BotBrain.new(f, combat, main)
+		f.label = _label(f, String(entry.get("name", f.display_name)))
+		rules.add_fighter(f.id, String(entry.get("name", f.display_name)), team, legend, i == 0)
+		_place(f, c)
+	var layer := CanvasLayer.new()
+	layer.layer = 15
+	main.add_child(layer)
+	hud = MatchHud.new()
+	layer.add_child(hud)
+	hud.setup(self)
+	var names := []
+	for f2: Fighter in combat.fighters:
+		names.append("%s(%d)" % [f2.display_name, f2.team])
+	print("[EQUIPOS] %s: %s · al mejor de %d rondas" % [mode, ", ".join(names), rules.rounds_to_win * 2 - 1])
+	hud.banner("RONDA 1")
+
+
 ## Celda de salida para el hueco `slot` de un equipo: repartidas por la zona, no apiladas.
 func _area_cell(team: int, slot: int) -> Vector2i:
 	var cells: Array = areas.get(team, [])
@@ -125,7 +201,7 @@ func _area_cell(team: int, slot: int) -> Vector2i:
 func _spawn_bot(legend: int, team: int, slot: int) -> Fighter:
 	var c := _area_cell(team, slot)
 	var f := combat.spawn_fighter(legend, team, false, main._cell_pos(c.x, c.y) + Vector3(0, 0.2, 0))
-	_apply_pvp_rules(f)
+	apply_pvp_rules(f)
 	f.brain = BotBrain.new(f, combat, main)
 	f.label = _label(f, f.display_name)
 	rules.add_fighter(f.id, f.display_name, team, legend)
@@ -133,8 +209,12 @@ func _spawn_bot(legend: int, team: int, slot: int) -> Fighter:
 	return f
 
 
-## Reglas por equipos en una leyenda: vida ×3 (entera) y definitiva por carga, vacía.
-func _apply_pvp_rules(f: Fighter) -> void:
+## Reglas por equipos en una leyenda: vida ×3 (entera) y definitiva por carga, vacía. Estática
+## porque el CLIENTE en línea (net/net_client.gd) también las necesita sobre su leyenda predicha y
+## ahí no hay TeamMode ninguno: sin ellas su munición era 0 (o sea, "sin límite") y su definitiva
+## iba por recarga en vez de por carga, así que el HUD contaba una partida distinta de la que
+## simulaba el servidor (2026-09-20).
+static func apply_pvp_rules(f: Fighter) -> void:
 	f.hp_mult = PVP_HP_MULT
 	f.rec["hpmax"] = f.hp_max()
 	f.rec["hp"] = f.hp_max()
@@ -194,22 +274,28 @@ static func make_label(f: Fighter, text: String) -> Label3D:
 	return lbl
 
 
-## Los cerebros piensan y deciden (antes de que el mundo avance).
+## Los cerebros piensan y deciden (antes de que el mundo avance). Una leyenda remota (juego en línea,
+## `f.peer != 0`) no tiene cerebro que pensar, pero en un descanso de ronda tampoco debe seguir
+## andando con el último control que mandó su jugador: se para igual que se pararía un bot.
 func tick_brains(delta: float) -> void:
 	var playing := rules.state == "playing"
 	for f: Fighter in combat.fighters:
-		if f.brain == null:
-			continue
-		if playing:
-			(f.brain as BotBrain).tick(delta)
-		else:
+		if f.brain != null:
+			if playing:
+				(f.brain as BotBrain).tick(delta)
+			else:
+				f.wish = Vector3.ZERO
+		elif f.peer != 0 and not playing:
 			f.wish = Vector3.ZERO
 
 
-## Mueve a las leyendas que lleva un cerebro (tu leyenda solo con --autoplay).
+## Mueve a las leyendas que lleva un cerebro (tu leyenda solo con --autoplay) y a las que maneja un
+## jugador remoto (juego en línea, `f.peer != 0`: RemoteControl ya escribió su wish/run/crouch este
+## fotograma en Net.on_input, antes de llegar aquí -el servidor no tiene teclado local que mover pf
+## aparte, así que esta es la única llamada a move_fighter para una plaza humana).
 func move_bots(delta: float) -> void:
 	for f: Fighter in combat.fighters:
-		if f.brain != null:
+		if f.brain != null or f.peer != 0:
 			combat.move_fighter(f, delta)
 
 
@@ -309,7 +395,7 @@ func _revive(f: Fighter, c: Vector2i) -> void:
 	f.since_damage = 0.0
 	# La definitiva NO se vacía: la carga que llevaras pasa a la ronda siguiente, y si ya estaba
 	# lista, empiezas con ella (petición del usuario, 2026-09-18; antes empezaba vacía en cada
-	# ronda). Solo empieza vacía al principio de la partida (_apply_pvp_rules). Las demás ranuras
+	# ronda). Solo empieza vacía al principio de la partida (apply_pvp_rules). Las demás ranuras
 	# se rellenan enteras en reset_abilities, así que tampoco pierden nada.
 	combat.cure(f.rec)
 	f.reset_abilities()

@@ -1,6 +1,8 @@
 ## Pausa: botón ☰ arriba a la izquierda (y la tecla P) que detiene la partida y ofrece Seguir,
 ## Reiniciar o volver al Menú. Sin esto, en móvil no había forma de salir de una partida ni de la
 ## Horda sin cerrar la aplicación. Sigue funcionando con el árbol en pausa (PROCESS_MODE_ALWAYS).
+## En una partida EN LÍNEA existe igual (2026-09-20: antes no se creaba, y el móvil se quedaba sin
+## salida), pero no para el mundo ni ofrece "Reiniciar": ver toggle() y _to_menu().
 class_name PauseMenu
 extends Control
 
@@ -8,6 +10,19 @@ var main: Main
 var _panel: PanelContainer
 var _fps_btn: Button
 var _was_captured := false
+
+
+## Se cuelga a sí misma de Main en su propia capa, por encima del táctil (capa 40) para que el botón
+## se pueda pulsar con el dedo. Lo monta aquí y no en main.gd porque main.gd no crece (CLAUDE.md) y
+## porque así la capa y el menú viajan juntos.
+static func install(p_main: Main) -> PauseMenu:
+	var layer := CanvasLayer.new()
+	layer.layer = 40
+	p_main.add_child(layer)
+	var menu := PauseMenu.new()
+	layer.add_child(menu)
+	menu.setup(p_main)
+	return menu
 
 
 func setup(p_main: Main) -> void:
@@ -39,7 +54,14 @@ func setup(p_main: Main) -> void:
 	title.add_theme_font_size_override("font_size", 44)
 	title.add_theme_color_override("font_color", Color(1.0, 0.82, 0.38))
 	col.add_child(title)
-	for entry in [["Seguir", toggle], ["Reiniciar", _restart], ["Menú", _to_menu]]:
+	# En línea no hay "Reiniciar": la partida es de todos, no se recarga la escena de uno solo. Lo que
+	# sí hace falta es una salida -antes, en una partida en red no se creaba ni este menú ni el atajo
+	# P, así que en el móvil la única forma de salir era matar la aplicación (revisión de la tarea
+	# 5b, 2026-09-20)-.
+	var entries := [["Seguir", toggle], ["Reiniciar", _restart], ["Menú", _to_menu]]
+	if main.net_client != null:
+		entries = [["Seguir", toggle], ["Salir de la partida", _to_menu]]
+	for entry in entries:
 		var b := _button(entry[0], Vector2(300, 68), 30)
 		b.pressed.connect(entry[1])
 		col.add_child(b)
@@ -96,7 +118,22 @@ func _unhandled_input(e: InputEvent) -> void:
 func toggle() -> void:
 	var opening := not _panel.visible
 	_panel.visible = opening
-	get_tree().paused = opening
+	if main.net_client == null:
+		get_tree().paused = opening
+	else:
+		# En línea el mundo NO se para: el servidor sigue simulando y los demás jugando, así que
+		# pausar el árbol solo te dejaría ciego -y tu leyenda seguiría corriendo allí con el último
+		# control que mandaste, porque el servidor repite el que tenga hasta que llegue otro-. Lo que
+		# se corta es la ENTRADA, y no basta con taparla con este Control: el joystick se lee en
+		# `PlayerInput._input()`, que corre ANTES del GUI. De ahí `blocked` (y soltar lo que el dedo
+		# tuviera puesto, o el joystick se queda clavado en su último valor y sales corriendo).
+		# `mouse_filter` sí sirve para lo demás: los clics de ratón van por `_unhandled_input`, que el
+		# GUI sí intercepta. Y WASD se cae solo: `_read_local_input` solo lo lee con el ratón capturado.
+		mouse_filter = Control.MOUSE_FILTER_STOP if opening else Control.MOUSE_FILTER_IGNORE
+		if main.input != null:
+			main.input.blocked = opening
+			if opening:
+				main.input.release_touch()
 	if opening:
 		_was_captured = Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -114,7 +151,14 @@ func _restart() -> void:
 
 func _to_menu() -> void:
 	get_tree().paused = false
+	# En línea hay que soltar la conexión ANTES de recargar: `Net.leave` para al cliente (deja de
+	# haber partida), y sin eso `Main._pick_mode` volvería a entrar en la misma partida en cuanto la
+	# escena se reconstruyera.
+	if main.net_client != null:
+		NetService.node().leave()
 	if Engine.has_meta("fl_mode"):
 		Engine.remove_meta("fl_mode")
-	Engine.set_meta("fl_legend", main.pf.legend)
+	var me := main.hud_fighter()
+	if me != null:           # en línea, antes de la primera foto con tu id, no hay leyenda todavía
+		Engine.set_meta("fl_legend", me.legend)
 	get_tree().reload_current_scene()

@@ -201,6 +201,11 @@ func can_start(by: int) -> String:
 		return "No hay nadie en la sala."
 	if not all_ready():
 		return "Faltan jugadores por marcar ¡Listo! (%d/%d)." % [ready_count(), ready_needed()]
+	# La Horda en línea es la fase 3 (docs/superpowers/specs/2026-09-18-juego-en-linea-design.md):
+	# arrancarla hoy montaría una Horda de bots al azar en el servidor, ignorando el reparto que
+	# enseña la sala (tarea 3, decisión ya tomada: guarda explícita, no un sinsentido silencioso).
+	if is_horde():
+		return "La Horda en línea llega en la fase 3."
 	return ""
 
 

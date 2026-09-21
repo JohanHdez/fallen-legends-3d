@@ -96,12 +96,19 @@ func _test_snapshot_roundtrip() -> void:
 			"downed": i == 3,
 			"marked": i == 5,
 		})
-	var sent := {"t": 12.5, "ack": 999, "fighters": fighters, "zone": 0.42, "clock": 87.5, "round": 2}
+	var sent := {"t": 12.5, "ack": 999, "fighters": fighters, "zone": 0.42, "clock": 87.5, "round": 2,
+		"ammo": 2, "ammo_t": 0.4, "ult_charge": 0.73}
 	var bytes := NetCodec.encode_snapshot(sent)
 	var got := NetCodec.decode_snapshot(bytes)
 	_check(not got.is_empty(), "decode_snapshot de bytes válidos no da {}")
 	_check(int(got.get("round", -1)) == 2, "la ronda va y vuelve igual")
 	_check(int(got.get("ack", -1)) == 999, "el ack va y vuelve igual")
+	# Lo TUYO (2026-09-20): munición, lo que falta para el próximo disparo y la carga de la
+	# definitiva. Sin esto el cliente pintaba el botón con su propia cuenta optimista mientras el
+	# servidor ya no disparaba nada.
+	_check(int(got.get("ammo", -1)) == 2, "la munición va y vuelve igual")
+	_check(absf(float(got.get("ammo_t", -1.0)) - 0.4) <= 1.0 / 255.0 + 0.0001, "lo que falta del disparo que vuelve, por debajo de 1/255")
+	_check(absf(float(got.get("ult_charge", -1.0)) - 0.73) <= 1.0 / 255.0 + 0.0001, "la carga de la definitiva, por debajo de 1/255")
 	_check(absf(float(got.get("t", -1.0)) - 12.5) < 0.01, "el instante va y vuelve igual")
 	_check(absf(float(got.get("zone", -1.0)) - 0.42) < 0.01, "la zona va y vuelve igual")
 	_check(absf(float(got.get("clock", -1.0)) - 87.5) < 0.01, "el reloj va y vuelve igual")
