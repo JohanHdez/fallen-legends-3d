@@ -88,6 +88,19 @@ var _ammo_max := 0
 var _leaving := false        # --leave-test: ya se pulsó "Salir de la partida"
 var _leave_t := 0.0
 var _pause_problems: Array = []
+var _roster_n := 0
+# Marcador del cliente (tarea 6), muestreado MIENTRAS hay partida y no al final: con --leave-test el
+# final llega cuando ya se ha salido y el cliente ya ha soltado su HUD, así que comprobarlo entonces
+# daba un falso FALLO (visto en la puerta completa del 2026-09-20).
+var _hud_seen := false
+var _scores_n := -1
+var _clock_min := INF
+var _round_seen := 0
+# --match-test (tarea 7): en vez de empujar y salir, se queda hasta que la partida TERMINA y
+# comprueba que el cliente se entera: carteles de ronda, estado final y pantalla de resultados.
+var _states: Array = []
+var _end_seen := false
+var _over_t := -1.0          # desde que el servidor dio la partida por terminada
 
 
 func _ready() -> void:
@@ -156,6 +169,7 @@ func _process(delta: float) -> void:
 	# práctica pasa en el primer par de fotos de cada partida, mientras el servidor todavía no ha
 	# confirmado ningún control (`ack=0`) y no hay lag que reconciliar todavía-: si acaba de saltar,
 	# esta muestra solo REBASA el punto de partida, no se compara con la anterior.
+	_sample_hud()
 	var now_pos: Vector3 = net.client.predicted_visual_pos()
 	if now_pos != Vector3.INF and _live_prev != Vector3.INF:
 		_pushed_dist += Vector2(_live_prev.x, _live_prev.z).distance_to(Vector2(now_pos.x, now_pos.z))
@@ -179,6 +193,19 @@ func _process(delta: float) -> void:
 			_tap_t = 0.0
 			_tap_ability(0)
 		_sample_ammo()
+	if net.cmdline.has("match-test"):
+		# Se queda mirando hasta que el servidor da la partida por terminada (o hasta que se agote
+		# --secs, que entonces es el fallo). No hay `_settle_t` ni salida: lo que se prueba es
+		# justamente que el cliente ve el FINAL.
+		# Se espera un momento DESPUÉS de "over" en vez de salir en cuanto aparece la pantalla final:
+		# así, si la pantalla NO llega a salir, el fallo dice justo eso en vez de agotar --secs con un
+		# "no terminó" que no explica nada.
+		var r2: TeamMatch = net.client.rules
+		if r2 != null and r2.state == "over":
+			_over_t = 0.0 if _over_t < 0.0 else _over_t + delta
+			if _over_t >= 1.0:
+				_finish(_match_problems())
+		return
 	if _push_t > _push_secs and _touch:
 		print("[RED] munición: %d de %d en el peor momento tras %d toques de la básica" % [
 			_ammo_min, _ammo_max, _taps])
@@ -224,6 +251,26 @@ func _tap_ability(slot: int) -> void:
 		print("[RED] toco la ranura %d con el dedo" % slot)
 
 
+## El marcador del cliente, tal y como lo está pintando `ui/match_hud.gd`. El cliente lleva su propia
+## copia de TeamMatch y NUNCA le llama a `tick`, así que su reloj solo baja si la foto del servidor
+## se lo copia: si ese cableado se rompe, `_clock_min` se queda en TeamMatch.ROUND_TIME.
+func _sample_hud() -> void:
+	if net.client.hud != null:
+		_hud_seen = true
+	var r: TeamMatch = net.client.rules
+	if r == null:
+		return
+	_scores_n = r.scores.size()
+	_clock_min = minf(_clock_min, r.round_time_left)
+	_round_seen = r.round
+	if _states.is_empty() or String(_states[-1]) != r.state:
+		_states.append(r.state)
+		print("[RED] la partida pasa a '%s' (ronda %d, %d-%d)" % [r.state, r.round,
+			int(r.round_wins[1]), int(r.round_wins[2])])
+	if net.client.hud != null and net.client.hud.has_end():
+		_end_seen = true
+
+
 ## Munición de tu leyenda predicha, como la pinta el HUD (ui/ammo_bar.gd y touch_ui.gd leen esto
 ## mismo). Se queda con la peor: ver que baja del tope es lo que prueba que la foto del servidor la
 ## trae de verdad. Una leyenda sin munición (la Ilusionista) deja `_ammo_max` a 0 y no es puerta.
@@ -253,6 +300,7 @@ func _on_match_started(mode: String, seed_value: int, roster: Array) -> void:
 	if _done:
 		return
 	_started = true
+	_roster_n = roster.size()
 	print("[RED] partida iniciada: %s · semilla %d · %d plazas · empujo 'avanzar' %.0f s en cuanto exista mi leyenda" % [
 		mode, seed_value, roster.size(), _push_secs])
 
@@ -321,6 +369,22 @@ func _check_pause_blocks_input(menu: PauseMenu) -> void:
 		print("[RED] con la pausa abierta el joystick no responde y el que había puesto se soltó")
 
 
+## --match-test: qué tiene que haber visto el cliente de una partida entera. Sin esto, en línea la
+## partida se acababa solo en el servidor: el jugador se quedaba corriendo por un mapa donde ya no
+## pasaba nada, sin cartel de ronda, sin resultado y sin forma de saber que había terminado.
+func _match_problems() -> Array:
+	var out: Array = []
+	if not _states.has("break") and _round_seen <= 1:
+		out.append("el cliente nunca vio cambiar de ronda ni el descanso (estados: %s)" % str(_states))
+	if not _states.has("over"):
+		out.append("el cliente nunca vio terminar la partida (estados: %s)" % str(_states))
+	if not _end_seen:
+		out.append("no salió la pantalla final")
+	else:
+		print("[RED] partida terminada y pantalla final puesta; estados vistos: %s" % str(_states))
+	return out
+
+
 ## Un toque en el centro del joystick, por el mismo `_input` por el que entra un dedo de verdad.
 func _grabs_joystick(input: PlayerInput) -> bool:
 	input.release_touch()
@@ -352,6 +416,22 @@ func _finish(problems: Array) -> void:
 	if _started and net.client != null and net.client.main != null:
 		if (net.client.main as Node).find_children("*", "PauseMenu", true, false).is_empty():
 			problems.append("no hay menú de pausa en la partida en línea: no se puede salir")
+	# Marcador y registro de bajas en el cliente (tarea 6). El cliente lleva su propia copia de
+	# TeamMatch SOLO para pintar y nunca le llama a `tick`, así que su reloj solo puede bajar si la
+	# foto del servidor se lo está copiando: si el cableado se rompe, se queda clavado en
+	# TeamMatch.ROUND_TIME. Las rondas ganadas y el estado ("break", "over") los prueba la tarea 7,
+	# que juega una partida entera con rondas cortas.
+	if _pushing:
+		if not _hud_seen:
+			problems.append("el cliente no tuvo HUD de partida: ni marcador ni bajas")
+		elif _scores_n != _roster_n:
+			problems.append("el marcador del cliente tuvo %d plazas y el reparto tenía %d" % [
+				_scores_n, _roster_n])
+		elif _clock_min > TeamMatch.ROUND_TIME - 3.0:
+			problems.append("el reloj del cliente se quedó en %.1f s: la foto no le trae el marcador" % _clock_min)
+		else:
+			print("[RED] marcador del cliente: ronda %d, %.1f s, %d plazas" % [
+				_round_seen, _clock_min, _scores_n])
 	# Munición de verdad: ver arriba (_sample_ammo). Solo con el dedo, que es quien toca el botón.
 	if _touch and _ammo_max > 0 and _ammo_min >= _ammo_max:
 		problems.append("la munición se quedó en %d de %d tras %d toques: la foto no la trae" % [

@@ -98,11 +98,18 @@ func check_elimination(alive: Dictionary) -> void:
 	_end_round(0 if a == 0 and b == 0 else (1 if b == 0 else 2), "eliminación")
 
 
+## Envejece el registro de bajas (el HUD deja de enseñar cada línea a los 6 s). Aparte de `tick`
+## porque un cliente en línea necesita ESTO y nada más: lleva su propia copia de TeamMatch solo para
+## pintar, y quien decide rondas y relojes es el servidor (2026-09-20).
+func age_feed(delta: float) -> void:
+	for e in feed:
+		e["age"] = float(e["age"]) + delta
+
+
 ## Avanza relojes. `alive` y `hp` (vida sumada en fracciones, {1: x, 2: y}) deciden la ronda si se
 ## acaba el tiempo: más leyendas en pie, y si hay las mismas, más vida.
 func tick(delta: float, alive := {}, hp := {}) -> void:
-	for e in feed:
-		e["age"] = float(e["age"]) + delta
+	age_feed(delta)
 	match state:
 		"playing":
 			round_time_left -= delta

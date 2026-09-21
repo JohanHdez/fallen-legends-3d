@@ -97,7 +97,8 @@ func _test_snapshot_roundtrip() -> void:
 			"marked": i == 5,
 		})
 	var sent := {"t": 12.5, "ack": 999, "fighters": fighters, "zone": 0.42, "clock": 87.5, "round": 2,
-		"ammo": 2, "ammo_t": 0.4, "ult_charge": 0.73}
+		"ammo": 2, "ammo_t": 0.4, "ult_charge": 0.73,
+		"wins": {1: 1, 2: 2}, "rounds_to_win": 2, "state": "break"}
 	var bytes := NetCodec.encode_snapshot(sent)
 	var got := NetCodec.decode_snapshot(bytes)
 	_check(not got.is_empty(), "decode_snapshot de bytes válidos no da {}")
@@ -109,6 +110,12 @@ func _test_snapshot_roundtrip() -> void:
 	_check(int(got.get("ammo", -1)) == 2, "la munición va y vuelve igual")
 	_check(absf(float(got.get("ammo_t", -1.0)) - 0.4) <= 1.0 / 255.0 + 0.0001, "lo que falta del disparo que vuelve, por debajo de 1/255")
 	_check(absf(float(got.get("ult_charge", -1.0)) - 0.73) <= 1.0 / 255.0 + 0.0001, "la carga de la definitiva, por debajo de 1/255")
+	# Marcador (2026-09-20): rondas ganadas, al mejor de cuántas y en qué estado va la partida. Sin
+	# esto el cliente no tenía con qué pintar el marcador de arriba.
+	var wins: Dictionary = got.get("wins", {})
+	_check(int(wins.get(1, -1)) == 1 and int(wins.get(2, -1)) == 2, "las rondas ganadas van y vuelven (%s)" % wins)
+	_check(int(got.get("rounds_to_win", -1)) == 2, "el 'al mejor de' va y vuelve")
+	_check(String(got.get("state", "")) == "break", "el estado de la partida va y vuelve (%s)" % got.get("state", ""))
 	_check(absf(float(got.get("t", -1.0)) - 12.5) < 0.01, "el instante va y vuelve igual")
 	_check(absf(float(got.get("zone", -1.0)) - 0.42) < 0.01, "la zona va y vuelve igual")
 	_check(absf(float(got.get("clock", -1.0)) - 87.5) < 0.01, "el reloj va y vuelve igual")

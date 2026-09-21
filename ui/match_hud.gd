@@ -5,7 +5,22 @@
 class_name MatchHud
 extends Control
 
-var tm: TeamMode
+## De quién saca lo que pinta. Sin conexión lo rellena TeamMode con lo suyo; en línea lo rellena
+## NetClient, que lleva su propia copia de `TeamMatch` alimentada con lo que manda el servidor (la
+## foto trae reloj, ronda y rondas ganadas; las bajas llegan por aviso). Antes este HUD leía
+## `tm.combat.fighters`, `tm.main.pf` y `tm.revive` directamente, y por eso no había forma de
+## enseñárselo a un cliente en línea, que no tiene ninguna de las tres (2026-09-20).
+var main: Main
+var rules: TeamMatch
+var mode := ""
+var revive: ReviveSystem = null      # null en línea: la reanimación en red es la tarea 7
+## Tu equipo. Sin conexión siempre es el 1 (Azul), y por eso la pantalla final decía "¡VICTORIA!"
+## cuando ganaba el 1 a secas; en línea la sala te puede poner en el 2, así que ahí eso sería
+## mentira justo en el momento de la partida que más se mira (2026-09-20).
+var my_team := 1
+var dots := Callable()               # {1: "●○", 2: "●●"}: quién sigue en pie en cada equipo
+var on_restart := Callable()
+var on_menu := Callable()
 var _score: RichTextLabel
 var _goal: Label
 var _feed: RichTextLabel
@@ -17,7 +32,31 @@ var _banner_t := 0.0
 
 
 func setup(p_tm: TeamMode) -> void:
-	tm = p_tm
+	main = p_tm.main
+	rules = p_tm.rules
+	mode = p_tm.mode
+	revive = p_tm.revive
+	my_team = p_tm.main.pf.team if p_tm.main.pf != null else 1
+	dots = p_tm.hud_dots
+	on_restart = p_tm.restart
+	on_menu = p_tm.to_menu
+	_build()
+
+
+## Lo mismo para un cliente en línea (net/net_client.gd): sin TeamMode, sin ReviveSystem y con los
+## puntos del marcador sacados de la última foto en vez de `combat.fighters`.
+func setup_online(p_main: Main, p_rules: TeamMatch, p_mode: String, p_team: int, p_dots: Callable,
+		p_menu: Callable) -> void:
+	main = p_main
+	rules = p_rules
+	mode = p_mode
+	my_team = p_team
+	dots = p_dots
+	on_menu = p_menu
+	_build()
+
+
+func _build() -> void:
 	# set_anchors_AND_OFFSETS_preset, no set_anchors_preset: ya en el árbol, la segunda conserva el
 	# tamaño que tenía el nodo (0×0) y todo lo "centrado" acababa en la esquina superior izquierda.
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -119,20 +158,18 @@ static func _hex(c: Color) -> String:
 
 
 func _process(_delta: float) -> void:
-	if tm == null or tm.rules == null:
+	if rules == null or not dots.is_valid():
 		return
-	var m := tm.rules
+	var m := rules
 	var t := int(ceil(m.round_time_left))
 	# Rondas ganadas a los lados y, junto a cada equipo, un punto por leyenda: lleno en pie, hueco caída.
-	var dots := {1: "", 2: ""}
-	for f: Fighter in tm.combat.fighters:
-		dots[f.team] = String(dots[f.team]) + ("●" if f.alive() else "○")
+	var dots_now: Dictionary = dots.call()
 	_score.text = "[center][b][color=#%s]AZUL %d[/color][/b] [color=#%s]%s[/color]    Ronda %d · %d:%02d    [color=#%s]%s[/color] [b][color=#%s]%d ROJO[/color][/b][/center]" % [
-		_hex(TeamMode.TEAM_COLORS[1]), int(m.round_wins[1]), _hex(TeamMode.TEAM_COLORS[1]), dots[1],
+		_hex(TeamMode.TEAM_COLORS[1]), int(m.round_wins[1]), _hex(TeamMode.TEAM_COLORS[1]), dots_now[1],
 		m.round, t / 60, t % 60,
-		_hex(TeamMode.TEAM_COLORS[2]), dots[2], _hex(TeamMode.TEAM_COLORS[2]), int(m.round_wins[2])]
+		_hex(TeamMode.TEAM_COLORS[2]), dots_now[2], _hex(TeamMode.TEAM_COLORS[2]), int(m.round_wins[2])]
 	_goal.text = "%s · al mejor de %d · gana la ronda quien deja al rival sin nadie en pie" % [
-		String(GameModes.MODES[tm.mode]["name"]), m.rounds_to_win * 2 - 1]
+		String(GameModes.MODES[mode]["name"]), m.rounds_to_win * 2 - 1]
 	if _banner_t > 0.0:
 		_banner_t -= _delta
 		_banner.modulate.a = clampf(_banner_t / 0.6, 0.0, 1.0)
@@ -147,9 +184,9 @@ func _process(_delta: float) -> void:
 			lines.append("[right][color=#%s]%s[/color]  ✕  %s[/right]" % [
 				_hex(TeamMode.TEAM_COLORS.get(int(e["killer_team"]), Color.WHITE)), e["killer"], victim])
 	_feed.text = "\n".join(lines.slice(maxi(lines.size() - 4, 0)))
-	var pf := tm.main.pf
+	var pf := main.hud_fighter()
 	_down.text = ""
-	if m.state == "playing" and pf != null and tm.revive != null:
+	if m.state == "playing" and pf != null and revive != null:
 		if pf.downed:
 			if pf.revive_progress > 0.0:
 				_down.text = "Te están levantando… %d %%" % int(pf.revive_progress * 100.0)
@@ -158,26 +195,32 @@ func _process(_delta: float) -> void:
 		elif not pf.alive():
 			_down.text = "Has muerto · vuelves en la ronda siguiente"
 		else:
-			var lifting := tm.revive.helping(pf)
+			var lifting := revive.helping(pf)
 			if lifting != null:
 				_down.text = "Levantando a %s… %d %%" % [lifting.display_name, int(lifting.revive_progress * 100.0)]
 			else:
 				# Por equipos faltaba el aviso: solo lo tenía la Horda (usuario, 2026-09-18).
-				var mate := tm.main.downed_mate()
+				var mate := main.downed_mate()
 				if mate != null:
 					_down.text = Revive.hint(pf.pos().distance_to(mate.pos()), pf.crouch,
-						tm.main.touch, mate.display_name)
+						main.touch, mate.display_name)
 	if pf != null and pf.alive() and pf.marked_t > 0.0 and pf.mark_team != pf.team:
 		_mark.text = "¡Te han marcado por romper un señuelo! Te ven a través de todo · %d s" % int(ceil(pf.marked_t))
 	else:
 		_mark.text = ""
 
 
+## ¿Ya se enseñó la pantalla final? Lo mira la sonda de la tarea 7 para comprobar que una partida en
+## línea TERMINA de cara al jugador, no solo en el servidor.
+func has_end() -> bool:
+	return _end != null
+
+
 ## Pantalla final: resultado, marcador por leyenda y botones.
 func show_end() -> void:
 	if _end != null:
 		return
-	var r := tm.rules.result
+	var r := rules.result
 	var winner := int(r.get("winner", 0))
 	_end = PanelContainer.new()
 	_end.add_theme_stylebox_override("panel", _box(Color(0.03, 0.04, 0.07, 0.9), 18))
@@ -188,8 +231,8 @@ func show_end() -> void:
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 10)
 	_end.add_child(col)
-	var title := _label(52, Color(1, 0.82, 0.35) if winner == 1 else (Color(1, 0.45, 0.4) if winner == 2 else Color(0.9, 0.9, 0.95)))
-	title.text = "¡VICTORIA!" if winner == 1 else ("DERROTA" if winner == 2 else "EMPATE")
+	var title := _label(52, Color(1, 0.82, 0.35) if winner == my_team else (Color(1, 0.45, 0.4) if winner != 0 else Color(0.9, 0.9, 0.95)))
+	title.text = "¡VICTORIA!" if winner == my_team else ("DERROTA" if winner != 0 else "EMPATE")
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(title)
 	var why := _label(20, Color(0.85, 0.85, 0.9))
@@ -210,8 +253,8 @@ func show_end() -> void:
 			var h := _label(16, Color(0.7, 0.7, 0.75))
 			h.text = txt
 			grid.add_child(h)
-		for fid in tm.rules.scores:
-			var s: Dictionary = tm.rules.scores[fid]
+		for fid in rules.scores:
+			var s: Dictionary = rules.scores[fid]
 			if int(s["team"]) != team:
 				continue
 			for txt in [String(s["name"]), str(s["kills"]), str(s.get("downs", 0)), str(s["deaths"])]:
@@ -222,8 +265,11 @@ func show_end() -> void:
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 24)
 	col.add_child(row)
-	row.add_child(_button("Revancha", tm.restart))
-	row.add_child(_button("Menú", tm.to_menu))
+	# En línea no hay "Revancha" de uno solo: se vuelve a la sala (tarea 7), así que ese botón solo
+	# sale si alguien puso `on_restart`.
+	if on_restart.is_valid():
+		row.add_child(_button("Revancha", on_restart))
+	row.add_child(_button("Menú", on_menu))
 
 
 func _button(text: String, cb: Callable) -> Button:

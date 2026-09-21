@@ -50,6 +50,12 @@ var _bench_phys_n := 0
 # --- tarea 5: predicción y reconciliación de TU leyenda ---
 var predicted: Fighter = null   # tu leyenda de verdad: cuerpo y colisión reales, como sin conexión
 var ammo_bar: AmmoBar = null    # tu munición bajo tu vida (null si tu leyenda dispara sin límite)
+## Copia del marcador SOLO PARA PINTAR (tarea 6). El cliente no decide ni una regla: `rules` se
+## rellena con lo que manda el servidor -reloj, ronda, rondas ganadas y estado vienen en la foto; las
+## bajas, por aviso (Net._kill)- y de ahí vive el mismo `ui/match_hud.gd` que sin conexión. Se llama
+## `rules` por simetría con TeamMode, pero aquí no manda nada: nunca se le llama a `tick`.
+var rules: TeamMatch = null
+var hud: MatchHud = null
 var forced_wish := Vector2.INF  # Vector2.INF = lee el teclado/ratón de verdad; una sonda sin ventana
 var forced_run := false         # puede fijar esto en vez (no hay teclado que leer en --headless), como
 var forced_crouch := false      # el `wish` de Vector2 que ya usa NetService.send_input: en el plano del mundo.
@@ -105,6 +111,8 @@ func start(p_mode: String, p_seed: int, p_roster: Array) -> void:
 		predicted.body.queue_free()
 	predicted = null
 	ammo_bar = null          # colgaba del cuerpo que se acaba de soltar
+	hud = null               # cuelga del Main que está a punto de irse
+	rules = null
 	_pending.clear()
 	_send_t = 0.0
 	_mesh_offset = Vector3.ZERO
@@ -135,6 +143,8 @@ func stop() -> void:
 		predicted.body.queue_free()
 	predicted = null
 	ammo_bar = null          # colgaba del cuerpo que se acaba de soltar
+	hud = null               # cuelga del Main que se va
+	rules = null
 	_pending.clear()
 
 
@@ -156,6 +166,59 @@ func attach(p_main: Main) -> void:
 			my_fighter_id = i
 			break
 	_lag_ms = maxi(0, int(NetService.node().cmdline.get("lag", "0")))
+	_setup_hud()
+
+
+## El marcador de arriba, el registro de bajas y los avisos: el MISMO MatchHud que sin conexión, pero
+## alimentado desde la foto en vez de desde TeamMode (que en un cliente no existe). Sin esto, en
+## línea no se veía ni la ronda, ni el reloj, ni quién había matado a quién.
+func _setup_hud() -> void:
+	rules = build_rules(roster, my_fighter_id)
+	var layer := CanvasLayer.new()
+	layer.layer = 15
+	main.add_child(layer)
+	hud = MatchHud.new()
+	layer.add_child(hud)
+	var my_team := 1
+	if my_fighter_id >= 0 and my_fighter_id < roster.size():
+		my_team = int((roster[my_fighter_id] as Dictionary).get("team", 1))
+	hud.setup_online(main, rules, mode, my_team, hud_dots, leave_to_menu)
+	hud.banner("RONDA 1")
+
+
+## Puntos del marcador (● en pie, ○ caída): sin conexión salen de `combat.fighters`, que el cliente
+## no tiene; aquí salen de la última foto (vida 0 o derribada = caída) y del equipo que dijo el
+## reparto. Una leyenda que todavía no ha salido en ninguna foto no se pinta.
+func hud_dots() -> Dictionary:
+	var d := {1: "", 2: ""}
+	for e in _cur.get("fighters", []):
+		var a: Dictionary = e
+		var i := int(a["id"])
+		if i < 0 or i >= roster.size():
+			continue
+		var team := int((roster[i] as Dictionary).get("team", 1))
+		if not d.has(team):
+			continue
+		d[team] = String(d[team]) + ("○" if bool(a["downed"]) or float(a["hp"]) <= 0.0 else "●")
+	return d
+
+
+## Salir de la partida y volver al menú: lo mismo que "Salir de la partida" del menú de pausa
+## (ui/pause_menu.gd), para el botón de la pantalla final. Volver a la SALA con el marcador es la
+## tarea 7; hasta entonces, al menú.
+func leave_to_menu() -> void:
+	NetService.node().leave()
+	if Engine.has_meta("fl_mode"):
+		Engine.remove_meta("fl_mode")
+	get_tree().reload_current_scene()
+
+
+## Una baja que cuenta el servidor (Net._kill): al marcador de ESTE cliente, que es de donde sale el
+## registro de "quién mató a quién" del HUD. `TeamMatch.on_kill` solo apunta con la partida en
+## juego, y aquí el estado lo pone la foto.
+func on_kill(killer_id: int, victim_id: int) -> void:
+	if rules != null:
+		rules.on_kill(killer_id, victim_id)
 
 
 ## Foto recibida (Net._snapshot): con --lag=0 (lo normal) se aplica al momento; si no, se guarda para
@@ -187,6 +250,10 @@ func _ingest_snapshot(d: Dictionary) -> void:
 	if is_stale(float(d.get("t", 0.0)), _last_snapshot_t):
 		return
 	_last_snapshot_t = float(d["t"])
+	# El marcador, tal cual lo manda el servidor: el cliente no lo calcula, solo lo copia -y de los
+	# CAMBIOS saca los carteles, sin que haga falta un aviso aparte para cada uno-.
+	if rules != null:
+		_apply_score(d)
 	_prev = _cur
 	_prev_t = _cur_t
 	_cur = d
@@ -249,6 +316,16 @@ func _physics_process(delta: float) -> void:
 ## (spec, tarea 5). Es lo que hace que soltar el joystick/las teclas responda al instante en vez de
 ## a los 100 ms de la foto.
 func _apply_local_input(delta: float) -> void:
+	# Entre rondas y al acabar la partida, el servidor no mueve a nadie (TeamMode congela todo en
+	# "break" y en "over"). Predecir ahí separaría tu leyenda de donde el servidor la tiene y la
+	# siguiente foto la devolvería de un salto: mejor no moverla, que es justo lo que está pasando
+	# de verdad (tarea 7). Sin conexión de esto se encarga `main._frozen()`.
+	if rules != null and rules.state != "playing":
+		predicted.wish = Vector3.ZERO
+		predicted.run = false
+		predicted.holding_basic = false
+		main.combat.move_fighter(predicted, delta)
+		return
 	var d := _read_local_input(_scratch_input)
 	var wish: Vector2 = d["wish"]
 	predicted.wish = Vector3(wish.x, 0.0, wish.y)
@@ -378,6 +455,46 @@ func _predict_cooldown(f: Fighter, slot: int) -> void:
 			f.chg_t[slot] = cd
 	else:
 		f.cd[slot] = cd
+
+
+## Marcador de esta foto, y los carteles que salgan de comparar con el de la anterior: que suba la
+## ronda es "RONDA 2"; que el estado pase a "break", el resultado de la ronda que acaba -quién la ganó
+## se deduce de quién SUBIÓ su contador, sin gastar un solo byte más-; y que pase a "over", la
+## pantalla final. Así el cliente cuenta la misma partida que TeamMode._on_round_end/_on_over cuentan
+## sin conexión (tarea 7).
+func _apply_score(d: Dictionary) -> void:
+	var was_state := rules.state
+	var was_round := rules.round
+	var was_wins := {1: int(rules.round_wins[1]), 2: int(rules.round_wins[2])}
+	rules.round = int(d.get("round", rules.round))
+	rules.round_time_left = float(d.get("clock", rules.round_time_left))
+	rules.round_wins = d.get("wins", rules.round_wins)
+	rules.rounds_to_win = maxi(int(d.get("rounds_to_win", rules.rounds_to_win)), 1)
+	rules.state = String(d.get("state", rules.state))
+	if hud == null:
+		return
+	if rules.state != was_state and rules.state != "playing":
+		var w := 0
+		for t in [1, 2]:
+			if int(rules.round_wins[t]) > int(was_wins[t]):
+				w = t
+		if rules.state == "over":
+			rules.result = {"winner": _match_winner(), "rounds": rules.round_wins}
+			hud.show_end()
+		elif w == 0:
+			hud.banner("Ronda sin ganador")
+		else:
+			hud.banner("Ronda para %s" % TeamMode.TEAM_NAMES[w].to_upper(), TeamMode.TEAM_COLORS[w])
+	elif rules.round > was_round:
+		hud.banner("RONDA %d" % rules.round)
+
+
+## Quién ganó la partida según las rondas: 1, 2, o 0 si empataron. No hace falta que lo mande el
+## servidor -sale del mismo marcador que ya viaja en la foto-.
+func _match_winner() -> int:
+	var a := int(rules.round_wins[1])
+	var b := int(rules.round_wins[2])
+	return 0 if a == b else (1 if a > b else 2)
 
 
 ## Una foto tuya de verdad (con tu id): la primera vez, nace tu leyenda predicha justo donde dice el
@@ -559,6 +676,8 @@ func _process(delta: float) -> void:
 						break
 			view.apply_fighter(id, pos, yaw, int(c["anim"]), float(c["hp"]), bool(c["marked"]))
 		view.finish_frame()
+	if rules != null:
+		rules.age_feed(delta)   # el HUD deja de enseñar cada baja a los 6 s
 	if predicted != null:
 		_update_aim()
 	_follow_camera()
@@ -656,6 +775,20 @@ static func reconcile(confirmed: Vector3, pending: Array, step: Callable) -> Vec
 ## saltar directamente (spec: "si el error pasa de 1,5 m, salta; si es menor, se suaviza").
 static func should_snap(error_m: float) -> bool:
 	return error_m > RECONCILE_SNAP
+
+
+## El marcador con las plazas del reparto de la sala. El índice del reparto ES el id de la leyenda
+## (así lo monta TeamMode.setup_from_roster y así viaja en las fotos y en el aviso de baja), de modo
+## que un aviso "2 mató a 5" se convierte aquí en "Ana ✕ Beto" con sus colores de equipo. Estática y
+## sin nada de escena para poder probarla suelta (tests/test_net_predict.gd).
+static func build_rules(p_roster: Array, mine: int) -> TeamMatch:
+	var r := TeamMatch.new()
+	r.setup()
+	for i in p_roster.size():
+		var e: Dictionary = p_roster[i]
+		r.add_fighter(i, String(e.get("name", "")), int(e.get("team", 1)), int(e.get("legend", 0)),
+			i == mine)
+	return r
 
 
 ## Una foto con este `t` (reloj del SERVIDOR) es vieja o repetida frente a la última que se aplicó de

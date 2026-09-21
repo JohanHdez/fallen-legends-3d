@@ -28,10 +28,16 @@ fail=0
 # comando): matar solo "$server" mata ese subshell y deja al Godot real huérfano, sin nadie que lo
 # pare, todavía escuchando el puerto. Hay que matar también a su hijo real, con "pkill -P" antes de
 # que "$server" muera y ese hijo se quede sin padre que lo identifique.
+kill_one() {  # señal (TERM o KILL) y pid del trabajo
+  [ -n "${2:-}" ] || return 0
+  pkill -"$1" -P "$2" 2>/dev/null
+  kill -"$1" "$2" 2>/dev/null
+}
+# Hay DOS servidores: el de siempre y el de rondas cortas de la tarea 7 (partida entera), que solo
+# vive el rato de su prueba. Los dos se matan igual.
 kill_server() {  # señal (TERM o KILL)
-  [ -n "${server:-}" ] || return 0
-  pkill -"$1" -P "$server" 2>/dev/null
-  kill -"$1" "$server" 2>/dev/null
+  kill_one "$1" "${server:-}"
+  kill_one "$1" "${server2:-}"
 }
 
 # Que no quede un servidor ocupando el puerto aunque se corte la prueba: el siguiente arranque lo
@@ -249,6 +255,51 @@ if [ "$cs" -ne 0 ] || ! grep -q "^match_net_probe: OK" "$tmp/Sale.log" || grep -
   fail=1
 else
   echo "✓ cliente Sale: ☰ → 'Salir de la partida' suelta la conexión y vuelve al menú"
+fi
+
+# Una partida EN LÍNEA de principio a fin (tarea 7). Necesita un servidor propio, con rondas de 6 s:
+# el de arriba juega rondas de 150 s y no termina nunca dentro de una prueba. Con seis rondas sin
+# ganador la partida se acaba sola (TeamMatch.MAX_ROUNDS), así que no hay que fabricar una muerte.
+# Lo que se comprueba es que el CLIENTE se entera de todo: descansos, cambios de ronda, final y
+# pantalla de resultados. Antes de esta tarea la partida se acababa solo en el servidor y el jugador
+# se quedaba corriendo por un mapa donde ya no pasaba nada.
+PORT2="$((PORT + 1))"
+if lsof -nP -iTCP:"$PORT2" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "✗ el puerto $PORT2 (partida entera) ya está ocupado"
+  fail=1
+else
+  with_timeout 180 "$GODOT" --headless --path . -- --server --transport=ws --port="$PORT2" --log \
+    --rounds=2 --roundtime=6 --identity="$tmp/servidor2.json" >"$tmp/servidor2.log" 2>&1 &
+  server2=$!
+  listening2() { grep "servidor escuchando en el puerto $PORT2" "$tmp/servidor2.log" 2>/dev/null | grep -qv "ERROR"; }
+  for _ in $(seq 1 60); do listening2 && break; sleep 0.5; done
+  if ! listening2; then
+    echo "✗ el servidor de rondas cortas no arrancó"; tail -10 "$tmp/servidor2.log" | sed 's/^/    /'
+    fail=1
+  else
+    with_timeout 150 "$GODOT" --headless --path . -- --mode=menu --nodecor --client="ws://127.0.0.1:$PORT2" \
+      --name=Fin --identity="$tmp/Fin.json" --netprobe=match_net_probe --want-mode=1v1 \
+      --secs=110 --push-secs=3 --touch --match-test >"$tmp/Fin.log" 2>&1
+    cf=$?
+    grep -E "^\[RED\] (la partida pasa a 'over'|partida terminada)|^match_net_probe" "$tmp/Fin.log" | tail -3 | sed 's/^/    Fin: /'
+    if [ "$cf" -ne 0 ] || ! grep -q "^match_net_probe: OK" "$tmp/Fin.log" || grep -q "SCRIPT ERROR" "$tmp/Fin.log"; then
+      echo "✗ cliente Fin: la partida en línea no termina de cara al jugador"
+      grep "problema:" "$tmp/Fin.log" | sed 's/^/    /'
+      fail=1
+    else
+      echo "✓ cliente Fin: descansos, cambios de ronda, final y pantalla de resultados"
+    fi
+    # Tarea 7: quien se va a mitad deja su leyenda a un bot, y la partida sigue para los demás.
+    if ! grep -q "un bot recoge la leyenda" "$tmp/servidor2.log"; then
+      echo "✗ nadie recogió la leyenda del jugador que se fue: se queda plantada en medio del mapa"
+      fail=1
+    else
+      grep "un bot recoge la leyenda" "$tmp/servidor2.log" | tail -1 | sed 's/^/    servidor: /'
+      echo "✓ servidor: un bot recoge la leyenda de quien se desconecta"
+    fi
+  fi
+  kill_one TERM "${server2:-}"
+  server2=""
 fi
 
 sleep 5   # el servidor, a solas, tras el 1v1 que dejó el último cliente: no debe reventar ni colgarse

@@ -224,6 +224,16 @@ static func apply_pvp_rules(f: Fighter) -> void:
 	f.enable_pvp_damage()         # daño de la básica por equipos (LegendData.PVP_BASIC_DMG)
 
 
+## Puntos del marcador del HUD (● en pie, ○ caída) por equipo. Sale de aquí y no de dentro de
+## MatchHud porque un cliente en línea no tiene `combat.fighters` con todo el mundo: solo su propia
+## leyenda y las fotos del servidor, así que allí lo rellena NetClient a su manera (2026-09-20).
+func hud_dots() -> Dictionary:
+	var d := {1: "", 2: ""}
+	for f: Fighter in combat.fighters:
+		d[f.team] = String(d[f.team]) + ("●" if f.alive() else "○")
+	return d
+
+
 ## Dónde vuelve solo un caído: una celda de la zona de salida de su equipo, repartida por su id.
 func _respawn_point(f: Fighter) -> Vector3:
 	var c := _area_cell(f.team, f.id % maxi(size, 1))
@@ -438,6 +448,10 @@ func on_fighter_death(f: Fighter, by: Fighter) -> void:
 	print("[BAJA] %s muere%s · en pie %d-%d" % [f.display_name,
 		(" a manos de " + by.display_name) if by != null else " (gas)",
 		int(counts[0][1]), int(counts[0][2])])
+	# Juego en línea (fase 2, tarea 6): el cliente no simula el combate, así que la baja hay que
+	# contársela -de ahí sale su registro de "quién mató a quién"-. Solo desde el servidor dedicado, y
+	# solo con partida en marcha: sin conexión `send_kill` no hace nada porque no hay peer.
+	NetService.node().send_kill(by.id if by != null else -1, f.id)
 	rules.check_elimination(counts[0])
 
 

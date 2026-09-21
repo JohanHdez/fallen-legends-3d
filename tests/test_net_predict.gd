@@ -95,5 +95,38 @@ func _init() -> void:
 	_check(not NetClient.is_stale(1.1, 1.0), "un instante más nuevo: no se descarta")
 	_check(not NetClient.is_stale(0.0, -INF), "la primera foto de la partida (nada aplicado todavía) nunca es vieja")
 
+	# --- build_rules(): el aviso de baja llega por IDS, y el HUD enseña NOMBRES (tarea 6) ---
+	# El índice del reparto es el id de la leyenda, así que "el 1 mató al 0" tiene que salir como
+	# "Beto ✕ Ana" con sus equipos. Sin este cableado, el registro de bajas del cliente salía vacío
+	# aunque el aviso llegara.
+	var roster := [
+		{"name": "Ana", "team": 1, "legend": 0},
+		{"name": "Beto", "team": 2, "legend": 3},
+	]
+	var rules := NetClient.build_rules(roster, 0)
+	_check(rules.scores.size() == 2, "el marcador del cliente tiene una plaza por jugador del reparto")
+	_check(rules.scores.has(0) and rules.scores.has(1)
+			and bool(rules.scores[0]["is_player"]) and not bool(rules.scores[1]["is_player"]),
+		"tu plaza es la tuya y la del otro no, y las dos van por el índice del reparto")
+	rules.on_kill(1, 0)
+	_check(rules.feed.size() == 1, "una baja avisada entra en el registro")
+	if rules.feed.size() == 1:
+		var e: Dictionary = rules.feed[0]
+		_check(String(e["killer"]) == "Beto" and String(e["victim"]) == "Ana",
+			"la baja dice quién mató a quién por su nombre (%s ✕ %s)" % [e["killer"], e["victim"]])
+		_check(int(e["killer_team"]) == 2 and int(e["victim_team"]) == 1,
+			"y con el equipo de cada uno, que es de donde salen los colores")
+	_check(rules.scores.has(0) and rules.scores.has(1)
+			and int(rules.scores[1]["kills"]) == 1 and int(rules.scores[0]["deaths"]) == 1,
+		"la baja cuenta en el marcador de los dos")
+	rules.on_kill(-1, 1)      # el gas no tiene autor
+	# El índice se comprueba antes de leerlo: una prueba que REVIENTA en vez de fallar deja el
+	# SceneTree corriendo para siempre y cuelga toda la puerta (visto el 2026-09-20 al ver fallar
+	# esta misma prueba a propósito).
+	_check(rules.feed.size() == 2, "la caída en el gas también entra en el registro")
+	if rules.feed.size() == 2:
+		_check(String((rules.feed[1] as Dictionary)["killer"]) == "",
+			"quien cae en el gas no tiene autor, y el HUD lo dice de otra manera")
+
 	print("test_net_predict: %s (%d fallos)" % ["OK" if failures == 0 else "FALLO", failures])
 	quit(1 if failures > 0 else 0)

@@ -896,13 +896,28 @@ sigue en la sala.
   de su variable `PORT`. `.dockerignore` deja fuera `models/` (175 MB de glTF que el servidor de la
   fase 1 no carga: con `--server`, `main.gd` sale antes de construir nada); **la fase 2 los volverá
   a necesitar**.
-- Protocolo `NetService.PROTOCOL` = 102 (100 → 101 en la fase 2, tarea 3, por los mensajes nuevos de
+- Protocolo `NetService.PROTOCOL` = 103 (100 → 101 en la fase 2, tarea 3, por los mensajes nuevos de
   control y lanzamiento; 101 → 102 el 2026-09-20, cuando el encabezado de la foto creció con tu
-  munición y la carga de tu definitiva): un cliente con otra versión es rechazado con el motivo (el
+  munición y la carga de tu definitiva; 102 → 103 el mismo día, con el marcador y el aviso de baja): un cliente con otra versión es rechazado con el motivo (el
   2D va por 3, así que un cliente del 2D no entra aquí por error). **Al subir el protocolo hay que
   redesplegar el servidor de Railway con el mismo commit que el APK**, o ninguno de los dos entra.
+- **La partida en línea se juega entera**: carteles de ronda, descansos y pantalla final con el
+  marcador por leyenda. El cliente los saca de los CAMBIOS del marcador que ya viaja en la foto, sin
+  un aviso nuevo para cada cosa. Entre rondas y al acabar no predice movimiento (el servidor congela
+  a todos, así que predecir ahí solo daría un salto después). **Quien se desconecta a mitad deja su
+  leyenda a un bot** y la partida sigue para los demás. Falta lo que pide el spec de **volver a la
+  sala** al acabar: hoy el botón de la pantalla final es "Menú" y suelta la conexión.
+- **El marcador también va en la foto** (2 bytes más: rondas ganadas, "al mejor de" y el estado de la
+  partida, a cuatro bits cada número), y las **bajas llegan por aviso aparte** (`reliable`: una foto
+  perdida la corrige la siguiente, una baja perdida no vuelve). El cliente lleva una copia de
+  `TeamMatch` solo para PINTAR —nunca se le llama a `tick`— y de ahí vive el mismo `ui/match_hud.gd`
+  que sin conexión: ronda, reloj, quién sigue en pie y el registro de "quién mató a quién".
+- **Todavía no se ven los efectos del combate en línea** (chispas, rayos, el disco de un golpe): el
+  cliente no simula, así que nunca llama a `emit_fx`. Mandarlos por red pide rehacer parte del
+  catálogo de `game/fx_sink.gd`, porque cinco de sus 18 tipos llevan NODOS como argumento y esos no
+  se serializan.
 - **Tu munición y la carga de tu definitiva viajan en la foto** (3 bytes en el encabezado, que ya va
-  uno por jugador: 115 → 118 bytes con 8 leyendas). El cliente NO las cuenta por su cuenta a
+  uno por jugador: 115 → 120 bytes con 8 leyendas, con el marcador incluido). El cliente NO las cuenta por su cuenta a
   propósito: gastar un disparo lo decide el servidor, así que la barra enseña los disparos que le
   quedan a la leyenda de verdad, con 50 ms de retraso, en vez de una cuenta propia que puede no
   coincidir. Antes la barra se quedaba llena para siempre y el botón seguía pintando su ciclo de
@@ -923,8 +938,10 @@ sigue en la sala.
   un tercero tiene otra versión y el servidor lo echa. De la partida: uno se mueve de verdad por la
   red, otro repite lo mismo con `--lag=150` (fotos retrasadas a propósito) y vigila que la predicción
   no dé tirones ni se quede por detrás, otro juega con el dedo (joystick y botón de verdad) y
-  comprueba que la munición del HUD baja porque lo dice el servidor, y el último pulsa "Salir de la
-  partida" en el menú de pausa. Si el puerto está ocupado, la prueba **falla y lo dice** en vez de
+  comprueba que la munición del HUD baja porque lo dice el servidor, otro pulsa "Salir de la partida"
+  en el menú de pausa, y el último juega una partida ENTERA (contra un segundo servidor con rondas
+  de 6 s: el de siempre juega rondas de 150 s y no termina dentro de una prueba) y comprueba que ve
+  los descansos, los cambios de ronda, el final y la pantalla de resultados. Si el puerto está ocupado, la prueba **falla y lo dice** en vez de
   probar contra un servidor viejo (2026-09-18).
 
 ## Opciones útiles para probar

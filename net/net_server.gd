@@ -14,6 +14,11 @@ class_name NetServer
 extends Node
 
 const SNAPSHOT_DT := 1.0 / 20.0     # 20 fotos/s (spec, § Protocolo)
+## Lo que sigue mandándose fotos DESPUÉS de que la partida acabe. Da tiempo a que a todos les llegue
+## el "over" (la pantalla final del cliente sale de ahí) y suelta la partida: sin esto `has_match()`
+## se quedaba en true mientras hubiera alguien conectado y el siguiente "Iniciar" de la sala se
+## rechazaba con "ya hay una partida en marcha" (tarea 7, 2026-09-20).
+const OVER_LINGER := 6.0
 
 var mode := ""
 var match_seed := 0
@@ -28,6 +33,7 @@ var _acks := {}                 # peer -> número de secuencia del ÚLTIMO contr
                                  # esto, `ack` iba siempre a 0 y ningún cliente sabía qué controles
                                  # podía dejar de reproducir tras una corrección-.
 var _snap_t := 0.0
+var _over_t := -1.0             # segundos desde que la partida terminó (-1 mientras se juega)
 var _snap_log_t := 0.0          # --log: cada cuánto se recuerdan los KB/s (no en cada foto, sería spam)
 
 
@@ -41,6 +47,7 @@ func start(p_mode: String, p_seed: int, p_roster: Array) -> void:
 	main = null
 	_start_pos.clear()        # partida nueva: nadie ha mandado un control todavía
 	_acks.clear()
+	_over_t = -1.0
 	running = true
 
 
@@ -52,6 +59,7 @@ func stop() -> void:
 	main = null
 	_start_pos.clear()
 	_acks.clear()
+	_over_t = -1.0
 
 
 func has_match() -> bool:
@@ -85,6 +93,13 @@ func _physics_process(delta: float) -> void:
 	if _snap_t >= SNAPSHOT_DT:
 		_snap_t -= SNAPSHOT_DT
 		_send_snapshot()
+	# Partida acabada: unas cuantas fotos más para que a todos les llegue el "over" -de ahí sale la
+	# pantalla final del cliente- y se suelta, para que la sala pueda empezar otra.
+	if main.team_mode.rules.state == "over":
+		_over_t = delta if _over_t < 0.0 else _over_t + delta
+		if _over_t >= OVER_LINGER:
+			print("[RED] partida terminada: la sala queda libre para empezar otra")
+			stop()
 
 
 ## Foto del mundo, 20 veces por segundo: posición, orientación, animación, vida y marca de cada
@@ -110,6 +125,7 @@ func _send_snapshot() -> void:
 		"clock": main.team_mode.rules.round_time_left, "round": main.team_mode.rules.round,
 	}
 	var net := NetService.node()
+	var rules := main.team_mode.rules
 	var peers := multiplayer.get_peers()
 	var last_bytes := 0
 	var sent := 0
@@ -130,6 +146,9 @@ func _send_snapshot() -> void:
 		base["ammo"] = f.ammo
 		base["ammo_t"] = f.ammo_t / maxf(f.ammo_reload, 0.01)
 		base["ult_charge"] = f.ult_charge
+		base["wins"] = rules.round_wins
+		base["rounds_to_win"] = rules.rounds_to_win
+		base["state"] = rules.state
 		var bytes := NetCodec.encode_snapshot(base)
 		net.send_snapshot_to(f.peer, bytes)
 		last_bytes = bytes.size()
@@ -228,19 +247,29 @@ func moved_distance(peer_id: int) -> float:
 	return f.pos().distance_to(_start_pos[peer_id] as Vector3)
 
 
-## Un jugador se fue a mitad de partida (Net._on_peer_disconnected): su leyenda se queda quieta,
-## nadie la maneja hasta que un bot la recoja (tarea 7, decisión ya tomada, no se adelanta aquí). De
-## paso, con --log, dice cuánto llegó a moverse: es lo único que el servidor le puede "enseñar" a la
-## sonda de la tarea 3 sin fotos todavía (tarea 4 se las manda de verdad).
+## Un jugador se fue a mitad de partida (Net._on_peer_disconnected): **un bot recoge su leyenda** y
+## la partida sigue para los demás (tarea 7). Antes se quedaba plantada donde estuviera: en un 2v2,
+## que uno se caiga de la red dejaba a su compañero contra dos y a un muñeco de pie en medio del
+## mapa. Se le suelta el `peer` a 0 -la plaza deja de ser de nadie- para que `move_bots`/`tick_brains`
+## la traten como a cualquier bot y para que `_send_snapshot` deje de dirigirle fotos.
+## De paso, con --log, dice cuánto llegó a moverse.
 func on_disconnect(peer_id: int, pname: String) -> void:
 	var f := fighter_for_peer(peer_id)
 	if f == null:
 		return
 	f.wish = Vector3.ZERO
 	f.run = false
+	f.holding_basic = false
+	# Cuánto se movió, ANTES de soltarle el peer: `moved_distance` busca su leyenda POR peer, y en
+	# cuanto se lo ponemos a 0 ya no la encuentra (visto en la puerta el 2026-09-20, que sigue esa
+	# línea para saber si RemoteControl movió de verdad a cada cliente).
+	var moved := moved_distance(peer_id)
+	if main != null and main.team_mode != null and f.brain == null:
+		f.peer = 0
+		f.brain = BotBrain.new(f, main.combat, main)
+		print("[RED] un bot recoge la leyenda de %s (%s)" % [pname, f.display_name])
 	if main != null and main._args.has("log"):
-		var d := moved_distance(peer_id)
-		if d >= 0.0:
-			print("[RED] %s se movió %.1f m antes de irse; su leyenda (%s) se queda quieta" % [pname, d, f.display_name])
+		if moved >= 0.0:
+			print("[RED] %s se movió %.1f m antes de irse" % [pname, moved])
 		else:
-			print("[RED] la leyenda de %s (%s) se queda quieta: nadie la maneja" % [pname, f.display_name])
+			print("[RED] %s se fue sin llegar a mandar un solo control" % pname)

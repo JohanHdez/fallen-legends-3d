@@ -20,11 +20,12 @@ const MAP_MAX := 200.0
 const INPUT_SIZE := 8
 
 ## Encabezado de una foto: t (float) + ack (u32) + zone (float) + clock (float) + round (u8) +
-## número de leyendas (u8) + número de criaturas (u8), más los tres bytes de lo TUYO (abajo).
+## número de leyendas (u8) + número de criaturas (u8), más los tres bytes de lo TUYO y los dos del
+## marcador (abajo).
 ## Los tres van en el ENCABEZADO, no en la lista de leyendas, porque la foto ya se codifica una vez
 ## por jugador (net/net_server.gd: cada uno lleva su propio `ack`): cuestan 3 bytes por foto en
 ## total, no 3 por leyenda.
-const SNAPSHOT_HEADER_SIZE := 22
+const SNAPSHOT_HEADER_SIZE := 24
 ## Una leyenda: id (u16) + pos (u16×3) + yaw (u8) + anim (u8) + vida (u8) + banderas (u8).
 const ACTOR_FIGHTER_SIZE := 12
 ## Una criatura (Horda, F3): igual que una leyenda pero sin banderas (ni derribo ni marca).
@@ -108,6 +109,13 @@ static func decode_input(b: PackedByteArray) -> Dictionary:
 ## "ult_charge" (0..1) son de QUIEN RECIBE la foto, no de una leyenda de la lista: son lo único de
 ## su ficha que el cliente no puede predecir solo -gastar munición y cargar la definitiva los decide
 ## el servidor, no el botón-, así que sin ellos el HUD del cliente mentía (2026-09-20).
+## "wins" ({1: n, 2: n}), "rounds_to_win" y "state" ("playing" | "break" | "over") son el marcador:
+## van apretados en dos bytes (cuatro bits cada número, que de sobra para un "al mejor de 3") porque
+## el cliente lleva su propia copia de TeamMatch solo para PINTAR y necesita rellenarla con algo.
+## Estados de TeamMatch por su índice en la foto: el orden NO se cambia (es protocolo).
+const STATES: PackedStringArray = ["playing", "break", "over"]
+
+
 static func encode_snapshot(d: Dictionary) -> PackedByteArray:
 	var buf := StreamPeerBuffer.new()
 	buf.put_float(float(d.get("t", 0.0)))
@@ -118,6 +126,10 @@ static func encode_snapshot(d: Dictionary) -> PackedByteArray:
 	buf.put_float(float(d.get("zone", 0.0)))
 	buf.put_float(float(d.get("clock", 0.0)))
 	buf.put_u8(clampi(int(d.get("round", 0)), 0, 255))
+	var wins: Dictionary = d.get("wins", {})
+	buf.put_u8((clampi(int(wins.get(1, 0)), 0, 15) << 4) | clampi(int(wins.get(2, 0)), 0, 15))
+	var state_i := maxi(STATES.find(String(d.get("state", "playing"))), 0)
+	buf.put_u8((clampi(int(d.get("rounds_to_win", 2)), 0, 15) << 4) | state_i)
 	var fighters: Array = d.get("fighters", [])
 	var creatures: Array = d.get("creatures", [])
 	var nf := mini(fighters.size(), 255)
@@ -148,6 +160,8 @@ static func decode_snapshot(b: PackedByteArray) -> Dictionary:
 	var zone := buf.get_float()
 	var clock := buf.get_float()
 	var round_n := buf.get_u8()
+	var wins_b := buf.get_u8()
+	var rules_b := buf.get_u8()
 	var nf := buf.get_u8()
 	var nc := buf.get_u8()
 	var need := nf * ACTOR_FIGHTER_SIZE + nc * ACTOR_CREATURE_SIZE
@@ -163,7 +177,9 @@ static func decode_snapshot(b: PackedByteArray) -> Dictionary:
 		creatures[i] = _get_actor(buf, false)
 	return {"t": t, "ack": ack, "fighters": fighters, "zone": zone, "clock": clock,
 		"round": round_n, "creatures": creatures,
-		"ammo": ammo, "ammo_t": ammo_t, "ult_charge": ult_charge}
+		"ammo": ammo, "ammo_t": ammo_t, "ult_charge": ult_charge,
+		"wins": {1: wins_b >> 4, 2: wins_b & 0xF}, "rounds_to_win": rules_b >> 4,
+		"state": STATES[mini(rules_b & 0xF, STATES.size() - 1)]}
 
 
 static func _put_actor(buf: StreamPeerBuffer, a: Dictionary, with_flags: bool) -> void:

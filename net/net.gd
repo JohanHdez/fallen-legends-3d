@@ -18,9 +18,10 @@ const DEFAULT_SERVER := "wss://fallen-legends-production.up.railway.app"
 ## coincidir con el 2D (va por 3). Sube a 101 en la tarea 3 (fase 2 del juego en línea): mensajes
 ## nuevos, `_input_frame` y `_cast`; y a 102 el 2026-09-20, cuando la foto empezó a llevar también
 ## tu munición y la carga de tu definitiva (NetCodec: el encabezado cambia de tamaño, así que un
-## cliente de la 101 leería las fotos corridas). Un cliente con otra versión —del 2D o de antes de
-## esta— es rechazado o no se registra, y su menú lo dice.
-const PROTOCOL := 102
+## cliente de la 101 leería las fotos corridas); y a 103 el mismo día, cuando la foto empezó a llevar
+## también el marcador (rondas ganadas, al mejor de cuántas y estado) y nació el aviso de baja. Un
+## cliente con otra versión —del 2D o de antes de esta— es rechazado o no se registra, y su menú lo dice.
+const PROTOCOL := 103
 ## Búferes y saludo del WebSocket, como el 2D (2026-09-14): con los 64 KB de serie, un atasco de un
 ## segundo en el móvil desbordaba la salida y se caía la conexión.
 const WS_OUTBOUND_BUFFER := 1048576
@@ -431,6 +432,23 @@ func _cast(slot: int, at: Vector3) -> void:
 ## comprobarlo por su cuenta con el campo `t` (revisión de la tarea 4, hallazgo 2: con WebSocket/TCP no
 ## se ve, pero la reconciliación de la tarea 5 se apoya en saber cuál es la foto más nueva, y un
 ## transporte UDP el día de mañana sí podría entregarlas fuera de orden).
+## Una baja (servidor -> todos): quién mató a quién, por id de leyenda -el mismo id que llevan las
+## fotos y el mismo índice que ocupa en el reparto de la sala-. Va `reliable` y no en la foto porque
+## es un SUCESO: una foto perdida la corrige la siguiente, una baja perdida no vuelve.
+@rpc("authority", "reliable")
+func _kill(killer_id: int, victim_id: int) -> void:
+	if dedicated or client == null:
+		return
+	client.on_kill(killer_id, victim_id)
+
+
+## El servidor cuenta una baja a todos (lo llama game/team_mode.gd.on_fighter_death).
+func send_kill(killer_id: int, victim_id: int) -> void:
+	if multiplayer.multiplayer_peer == null or not multiplayer.is_server():
+		return
+	_kill.rpc(killer_id, victim_id)
+
+
 @rpc("authority", "unreliable_ordered")
 func _snapshot(bytes: PackedByteArray) -> void:
 	if dedicated or client == null:
