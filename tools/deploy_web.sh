@@ -22,7 +22,8 @@ for f in index.html index.js index.wasm index.pck index.png index.audio.worklet.
 	[ -f "export/web/$f" ] && cp "export/web/$f" "$STAGE/site/"
 done
 echo "== Comprimiendo (gzip -9) los ficheros grandes"
-for f in index.wasm index.pck index.js; do
+# El .pck no: sus texturas ya van comprimidas y gzip solo lo bajaba de 91 a 88 MB (2026-11-05).
+for f in index.wasm index.js; do
 	gzip -9 -k "$STAGE/site/$f"
 done
 ls -lh "$STAGE/site"
