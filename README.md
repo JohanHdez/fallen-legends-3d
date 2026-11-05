@@ -312,6 +312,16 @@ queda **clavada en el suelo a la vista**, y su remolino tira de todo enemigo en 
 300 px) y le pega 26 cada 0,8 s durante 5 s, mientras él **sigue peleando** con su −30 % de daño
 recibido. Los bots la usan en cuanto tienen al objetivo dentro del alcance.
 
+**Del remolino se puede salir** (petición del usuario, 2026-11-05: "el ancla que los atrae es
+imposible de escapar"). Antes tiraba de todos **hasta el centro cada 0,8 s**: en el medio segundo
+entre tirones nadie salía de los 4,7 m, ni corriendo, y eran 7 tics de 26 (182 de daño). Ahora
+**atrae sin quitar el control**, a `Combat.ANCHOR_DRAG` = 1,6 m/s sumados a lo que camines
+(`Combat.drag`). Medido con `tests/anchor_escape_probe.gd` desde el centro: Tormentero sale
+caminando en 2,2 s (78 de daño) y corriendo en 1,1 s (52); el Caballero, el más lento, en 2,7 s
+(104) y 1,3 s (52). Agachado o frenado por el gas Nox va más lento que la atracción y no sale. En la
+Horda el Rompemareas no pierde nada: oleada 4 y 42 bajas sin caer a los 200 s, en 4 de 4 partidas
+(antes 24-42 bajas, oleada 3-4).
+
 Las cifras, tal cual del `.tres`: **2,7 m de radio** (170 px) y 180°; **mantener la tecla** lo carga
 hasta ×1,9 de radio (5,1 m) y ×2,1 de daño, y entonces es un **giro de 360°**. Preaviso de 0,3 s, el
 más lento del juego, y 1,1 s de recarga. Sonda: `--meleelog` imprime radio, apertura, a cuántos tocó

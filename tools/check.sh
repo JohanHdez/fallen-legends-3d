@@ -95,6 +95,8 @@ PROBES=(
   "hud_keys_probe --mode=2v2 --autoplay --touch --secs=12"
   "hud_keys_probe --mode=2v2 --autoplay --secs=12"
   "hud_keys_probe --autoplay --secs=12"
+  "anchor_escape_probe --mode=1v1 --legend=3 --nozone"
+  "anchor_escape_probe --mode=1v1 --legend=3 --nozone --run"
   "seed_map_probe --seed=4242 --touch"
   "seed_map_probe --seed=4242 --mode=2v2"
   "seed_map_probe --seed=31337 --mode=4v4"

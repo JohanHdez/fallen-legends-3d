@@ -58,6 +58,12 @@ const GUARD_DAMAGE_MULT := 0.55     # recibe un 45 % menos
 const GUARD_COL := Color(0.45, 0.72, 1.0)
 const KNOCK_TIME := 0.35            # lo que dura el desplazamiento de un empujón
 const PULL_SPEED := 14.0            # m/s a los que el ancla arrastra: el tiempo sale de la distancia
+# Remolino del Ancla clavada: atrae SIN quitar el control, sumado a lo que camines (petición del
+# usuario, 2026-11-05: "el ancla que los atrae es imposible de escapar"). Antes, cada 0,8 s, un tirón
+# entero hasta el centro: en el medio segundo entre tirones nadie salía de los 4,7 m, y eran 6 tirones
+# de 26. A 1,6 m/s, la leyenda más lenta (Caballero, 3,1 m/s) sale caminando en ~3 s y cualquiera
+# corriendo en ~1,5 s; agachado (×0,45) o frenado por el gas Nox (×0,5) no puede.
+const ANCHOR_DRAG := 1.6
 # --- combo automático de la básica del Caballero (petición del usuario, 2026-09-20) ---
 const COMBO_WINDOW := 2.0           # s sin acertar otro golpe antes de que la cuenta se reinicie
 
@@ -892,6 +898,20 @@ func pull(z: Dictionary, to: Vector3) -> void:
 		print("[ENGANCHE] tira de un enemigo %.1f m en %.2f s" % [dist, secs])
 
 
+## Acerca `step` metros hacia `to` sin tocar su movimiento (se suma a lo que camine), parando a un
+## brazo del centro y respetando paredes. Es la atracción del Ancla clavada (ANCHOR_DRAG).
+func drag(z: Dictionary, to: Vector3, step: float) -> void:
+	var body := z.get("node") as PhysicsBody3D
+	if body == null or not is_instance_valid(body):
+		return
+	var d := to - body.global_position
+	d.y = 0.0
+	var room := d.length() - 0.9
+	if room <= 0.0:
+		return
+	body.move_and_collide(d.normalized() * minf(step, room))
+
+
 # =====================================================================
 # Lanzar
 # =====================================================================
@@ -1400,6 +1420,8 @@ func tick_buff(f: Fighter, delta: float) -> void:
 		return
 	f.buff_left -= delta
 	f.buff_tick -= delta
+	for z in foes_in(f.team, f.buff_at, f.buff_rad):
+		drag(z, f.buff_at, ANCHOR_DRAG * delta)
 	if f.buff_tick <= 0.0:
 		f.buff_tick = 0.8
 		# El aura del Ancla clavada es otro golpe suyo y también levanta polvo, pero a la mitad:
@@ -1408,7 +1430,6 @@ func tick_buff(f: Fighter, delta: float) -> void:
 			"full": true, "arc": MELEE_ARC, "amount": 0.45})
 		for z in foes_in(f.team, f.buff_at, f.buff_rad):
 			hurt(z, f.buff_dmg, 0.0, f, f.buff_slot)
-			pull(z, f.buff_at)
 	if f.buff_left <= 0.0 and f.buff_fx != null:
 		f.buff_fx.queue_free()
 		f.buff_fx = null
