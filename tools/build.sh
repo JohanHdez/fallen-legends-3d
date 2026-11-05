@@ -66,7 +66,10 @@ export_web() {
   mkdir -p export/web
   echo "== Web -> export/web/index.html"
   "$GODOT" --headless --path . --export-release "Web" export/web/index.html
-  (cd export && rm -f fallen-legends-3d-web.zip && zip -qr fallen-legends-3d-web.zip web -x '*.import')
+  # El zip es un extra para pasarlo a mano; Git Bash en Windows no trae `zip`, y no por eso falla el export.
+  if command -v zip >/dev/null; then
+    (cd export && rm -f fallen-legends-3d-web.zip && zip -qr fallen-legends-3d-web.zip web -x '*.import')
+  fi
   echo "   Probar en local:  python3 -m http.server -d export/web 8060   (http://localhost:8060)"
   echo "   Sin hilos (thread_support=false), no hace falta COOP/COEP; cualquier hosting estático sirve."
 }

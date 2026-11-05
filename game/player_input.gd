@@ -30,6 +30,12 @@ const ORDERS_OFFSET := Vector2(-190.0, -130.0)   # desde la básica
 const ORDERS_TAP := 0.3
 const AIM_DEAD := 18.0       # px de arrastre a partir de los cuales se apunta a mano
 const AIM_RADIUS := 110.0    # px de arrastre que equivalen al alcance máximo
+# Botones de habilidad con teclado (solo se ven, no se tocan): kb_button_rects().
+const KB_RADIUS := 36.0
+const KB_SPACING := 128.0     # entre centros: caben debajo nombres como "Tormenta eléctrica"
+const KB_MARGIN := 40.0
+const KB_BOTTOM := 34.0
+const KB_KEYS := ["Clic izq", "Clic der", "Espacio"]
 
 var _touch_crouch := false        # el botón de agacharse en táctil
 var _preview := -1                 # qué habilidad se está apuntando (-1 ninguna)
@@ -69,9 +75,11 @@ func _fighter() -> Fighter:
 	return main.net_client.predicted if main.net_client != null else main.pf
 
 
+## Los botones de habilidad en pantalla. Con el dedo, joystick y botones que se tocan; con teclado
+## (desde 2026-11-05), los mismos tres botones en fila, solo para ver: icono, recarga, cargas y qué
+## tecla los lanza. Antes en PC solo había una línea de texto en la esquina y no se sabía qué hacía
+## cada tecla ni cuándo estaba lista. `mouse_filter = IGNORE`: los clics siguen yendo al juego.
 func _setup_touch() -> void:
-	if not main.touch:
-		return
 	var layer := CanvasLayer.new()
 	layer.layer = 20
 	main.add_child(layer)
@@ -93,6 +101,8 @@ func joy_center() -> Vector2:
 ## táctica a su izquierda y definitiva arriba. Más el botón de agacharse junto al joystick.
 func button_rects() -> Array:
 	var v := get_viewport().get_visible_rect().size
+	if not main.touch:
+		return kb_button_rects(v)
 	var main_c := Vector2(v.x - 100.0, v.y - 110.0)
 	return [
 		{"idx": 0, "c": main_c, "r": MAIN_SIDE / 2.0, "name": String(main._abil(0)["n"])},
@@ -101,6 +111,17 @@ func button_rects() -> Array:
 		{"idx": CROUCH_BTN, "c": crouch_center(joy_center()), "r": CROUCH_RADIUS, "name": "Agacharse"},
 	] + ([{"idx": ORDERS_BTN, "c": main_c + ORDERS_OFFSET, "r": ORDERS_RADIUS,
 		"name": Minions.ORDER_NAMES[main.pf.minion_order]}] if main._has_minions() else [])
+
+
+## Con teclado: básica, táctica y definitiva en fila abajo a la derecha, en el orden de los botones
+## del ratón (izquierdo, derecho) y luego Espacio. "key" es lo que se pinta encima de cada uno.
+func kb_button_rects(v: Vector2) -> Array:
+	var right := Vector2(v.x - KB_MARGIN - KB_RADIUS, v.y - KB_BOTTOM - KB_RADIUS)
+	var out := []
+	for i in 3:
+		out.append({"idx": i, "c": right - Vector2(KB_SPACING * (2 - i), 0.0), "r": KB_RADIUS,
+			"name": String(main._abil(i)["n"]), "key": KB_KEYS[i]})
+	return out
 
 
 static func crouch_center(joy: Vector2) -> Vector2:
@@ -359,7 +380,7 @@ func _unhandled_input(e: InputEvent) -> void:
 					_try_cast(0)
 				KEY_E:
 					_preview = 1
-				KEY_R:
+				KEY_R, KEY_SPACE:
 					_preview = 2
 				KEY_F:
 					if main._has_minions():
@@ -380,7 +401,7 @@ func _unhandled_input(e: InputEvent) -> void:
 					if _preview == 1:
 						_preview = -1
 						_try_cast(1)
-				KEY_R:
+				KEY_R, KEY_SPACE:
 					if _preview == 2:
 						_preview = -1
 						_try_cast(2)

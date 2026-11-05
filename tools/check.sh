@@ -94,6 +94,7 @@ PROBES=(
   "rocks_probe --secs=30"
   "hud_keys_probe --mode=2v2 --autoplay --touch --secs=12"
   "hud_keys_probe --mode=2v2 --autoplay --secs=12"
+  "hud_keys_probe --autoplay --secs=12"
   "seed_map_probe --seed=4242 --touch"
   "seed_map_probe --seed=4242 --mode=2v2"
   "seed_map_probe --seed=31337 --mode=4v4"

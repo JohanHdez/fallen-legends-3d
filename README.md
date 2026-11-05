@@ -831,7 +831,7 @@ jugar: `--badge=3`.
 | rueda | acercar / alejar |
 | clic izquierdo o Q | básica (mantener: carga el mandoble del Rompemareas) |
 | clic derecho o E | táctica (mantener para ver el radio, soltar para lanzar) |
-| R | definitiva (igual) |
+| Espacio o R | definitiva (igual: mantener para ver el radio) |
 | Ctrl | agacharse (en el móvil, el botón ▼ junto al joystick: un toque lo activa y otro lo quita) |
 | F | Rey liche con esqueletos: alterna Atacar/Reagrupar; mantenida, apunta una Emboscada (en el móvil, botón de órdenes) |
 | **C** | cambiar cámara: sobre el hombro ↔ vista alta tipo ARPG |
@@ -843,12 +843,18 @@ jugar: `--badge=3`.
 **La tecla que importa es la C.** La vista alta es la comparación honesta contra tu isométrica
 actual: ahí se ve si el combate de zonas se sigue leyendo o no.
 
-**Con el dedo no se enseñan teclas** (petición del usuario, 2026-09-20: "yo estoy en un celular, a mí
-no me sirve ese texto"): en táctil desaparecen las líneas de teclado del HUD de la esquina, del menú
-de inicio y de la pausa. Queda lo que sí sirve ahí: tu leyenda, tu vida, el reloj del gas y tus
-habilidades con su munición o carga. Lo vigila `tests/hud_keys_probe.gd`, que corre en la puerta con
-y sin `--touch`: no se puede comprobar con una captura porque con `--shot` el HUD no llega a
-escribirse.
+**El HUD de la esquina es una sola línea** (petición del usuario, 2026-11-05: "hay mucha información
+en texto en la parte superior izquierda"): en la Horda, `OLEADA 2/10 · 7 criaturas · 4 bajas`, y en
+los dos modos solo se añade lo que no se ve en otro sitio (OCULTO, el gas, las órdenes del Rey liche).
+Fuera quedaron tu vida (ya está la barra sobre tu leyenda), los FPS (se encienden en la pausa), props
+y celda (depuración), las habilidades en texto y las teclas (están en la pausa y en el menú).
+
+**Las habilidades son botones también con teclado**: los mismos iconos del móvil, en fila abajo a la
+derecha, con la tecla encima (**Clic izq · Clic der · Espacio**), recarga, cargas y munición. Solo se
+ven: los clics siguen yendo al juego. Antes en PC solo había texto `[Esfera voltaica 2/3]` y el
+usuario encontró Q/E/R "poco accesibles". Con el dedo no se enseñan teclas (2026-09-20: "yo estoy en
+un celular, a mí no me sirve ese texto"). Lo vigila `tests/hud_keys_probe.gd` (táctil, teclado y
+Horda): no se puede comprobar con una captura porque con `--shot` el HUD no llega a escribirse.
 
 ## Capturas sin jugar
 

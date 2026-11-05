@@ -27,6 +27,12 @@ func _draw() -> void:
 	if main.net_client != null and main.net_client.predicted == null:
 		return
 	var font := ThemeDB.fallback_font
+	if not main.touch:
+		# Con teclado solo los tres botones de habilidad, con su tecla encima (player_input.gd).
+		for b in main.input.button_rects():
+			_ability(b, font)
+			_key_badge(b, font)
+		return
 	# Joystick: base fija y pomo que sigue al dedo, igual que en el juego.
 	var jc: Vector2 = main.input.joy_center()
 	_round(TEX.underlay, jc, main.input.JOY_RADIUS, Color(1, 1, 1, 0.85))
@@ -56,7 +62,8 @@ func _ability(b: Dictionary, font: Font) -> void:
 	# dibujaban nunca, y el botón de la básica pintaba su ciclo como si tuviera balas infinitas
 	# (revisión de la tarea 5b, 2026-09-20).
 	var me: Fighter = main.hud_fighter()
-	var pressed: bool = main.input._aim_btn == i
+	# Con teclado, "pulsado" es mantener la tecla o el clic derecho (se está viendo el radio).
+	var pressed: bool = main.input._aim_btn == i or (not main.touch and main.input._preview == i)
 	var r: float = b["r"] * (1.06 if pressed else 1.0)
 	var ready: bool = main._ability_ready(i)
 	var icon: Texture2D = TEX.attack
@@ -157,6 +164,22 @@ func _crouch(b: Dictionary, font: Font) -> void:
 	draw_string_outline(font, Vector2(c.x - ss.x / 2.0, ty), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, 4, Color(0, 0, 0, 0.9))
 	draw_string(font, Vector2(c.x - ss.x / 2.0, ty), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
 		Color(0.5, 1.0, 0.6) if lift else Color(1, 1, 1, 0.95))
+
+
+## Con teclado: la tecla que lanza el botón, en una pastilla oscura encima.
+func _key_badge(b: Dictionary, font: Font) -> void:
+	var c: Vector2 = b["c"]
+	var key: String = b["key"]
+	var ks := font.get_string_size(key, HORIZONTAL_ALIGNMENT_LEFT, -1, 14)
+	var box := Rect2(c + Vector2(-ks.x / 2.0 - 7.0, -float(b["r"]) - 27.0), Vector2(ks.x + 14.0, 21.0))
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.05, 0.06, 0.1, 0.8)
+	sb.border_color = Color(1, 1, 1, 0.35)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(6)
+	draw_style_box(sb, box)
+	draw_string(font, Vector2(box.position.x + 7.0, box.position.y + 15.5), key,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 0.92, 0.7))
 
 
 func _round(tex: Texture2D, center: Vector2, radius: float, tint: Color) -> void:

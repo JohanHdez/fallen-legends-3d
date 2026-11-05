@@ -75,7 +75,7 @@ func setup(p_main: Main) -> void:
 	# (petición del usuario, 2026-09-20): ahí están los botones en pantalla, incluido el ▼.
 	if not main.touch:
 		var keys := Label.new()
-		keys.text = "Teclado: WASD mover · Shift correr · Ctrl agacharse\nQ o clic básica · E táctica · R definitiva · C cámara · P pausa"
+		keys.text = "WASD mover · Shift correr · Ctrl agacharse · ratón girar · rueda zoom\nClic izq (o Q) básica · Clic der (o E) táctica · Espacio (o R) definitiva\nmantén clic der o Espacio para ver el radio · C cámara · Esc suelta el ratón · P pausa"
 		keys.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		keys.add_theme_font_size_override("font_size", 16)
 		keys.add_theme_color_override("font_color", Color(0.8, 0.82, 0.9, 0.9))

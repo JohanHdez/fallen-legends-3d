@@ -1,15 +1,18 @@
-## Sonda: el HUD de la esquina no explica el teclado cuando juegas con el dedo.
+## Sonda: el HUD de la esquina es UNA línea, sin teclas ni habilidades, y las habilidades se ven
+## como botones en pantalla también con teclado.
 ##   godot --headless --fixed-fps 60 --path . -- --mode=2v2 --autoplay --touch --probe=hud_keys_probe
-##   godot --headless --fixed-fps 60 --path . -- --team=2 --autoplay --probe=hud_keys_probe
-## Petición del usuario (2026-09-20): "aparecen descripciones de cómo juegas en PC, pero yo estoy en
-## un celular, a mí no me sirve ese texto". Con `--touch` el HUD no debe nombrar ninguna tecla; sin
-## él tiene que seguir nombrándolas (el escritorio no pierde nada). Vale para la Horda y por equipos.
+##   godot --headless --fixed-fps 60 --path . -- --mode=2v2 --autoplay --probe=hud_keys_probe
+##   godot --headless --fixed-fps 60 --path . -- --autoplay --probe=hud_keys_probe          # Horda
+## Historia: el 2026-09-20 el usuario pidió quitar las teclas con el dedo ("yo estoy en un celular, a
+## mí no me sirve ese texto"); el 2026-11-05, que la esquina tenía demasiado texto y que en PC las
+## habilidades con Q/E/R no se veían. Desde entonces las teclas están en la pausa, y las habilidades
+## son los botones de touch_ui.gd en los dos modos (con teclado, con "Clic izq / Clic der / Espacio").
 ## No se puede comprobar con una captura: con `--shot`, main._process sale antes de escribir el HUD.
 ## Salida 0 si se cumple, 1 si no.
 extends Node
 
 ## Cualquiera de estas en el HUD significa que se están explicando controles de teclado y ratón.
-const KEY_WORDS := ["WASD", "clic", "Shift", "Ctrl", "Esc", "rueda", "F10"]
+const KEY_WORDS := ["WASD", "clic", "Clic", "Shift", "Ctrl", "Esc", "rueda", "F10", "Espacio"]
 
 var main: Node
 var _t := 0.0
@@ -29,22 +32,35 @@ func _process(delta: float) -> void:
 	if _t < 2.0:
 		return
 	var text := String(main.hud.text) if main.hud != null else ""
-	if text == "":
+	if main.team_mode == null and text == "":
 		if _t > _secs:
-			_finish(["el HUD nunca escribió nada en %.0f s" % _secs])
+			_finish(["el HUD de la Horda nunca escribió nada en %.0f s" % _secs])
 		return
-	var found: Array = []
+	_checked += 1
 	for w: String in KEY_WORDS:
 		if w in text:
-			found.append(w)
-	_checked += 1
-	if bool(main.touch) and not found.is_empty():
-		_bad.append("con el dedo, el HUD nombra teclas: %s" % str(found))
-	elif not bool(main.touch) and found.is_empty():
-		_bad.append("con teclado, el HUD dejó de nombrar las teclas: %s" % text.replace("\n", " / "))
-	# También hay que seguir viendo lo que importa: tu nombre y tu vida.
-	if not ("vida" in text or "CAÍDO" in text):
-		_bad.append("el HUD no dice tu vida: %s" % text.replace("\n", " / "))
+			_bad.append("el HUD nombra teclas (%s): %s" % [w, text])
+			break
+	if "\n" in text:
+		_bad.append("el HUD ocupa más de una línea: %s" % text.replace("\n", " / "))
+	for i in 3:
+		var n := String(main._abil(i)["n"])
+		if n in text:
+			_bad.append("el HUD repite en texto la habilidad '%s', que ya tiene botón: %s" % [n, text])
+	if main.team_mode == null and not ("OLEADA" in text):
+		_bad.append("el HUD de la Horda no dice la oleada: %s" % text)
+	# Los botones: en los dos modos tiene que existir la capa y dar las tres habilidades.
+	if main.touch_ui == null:
+		_bad.append("no hay botones de habilidad en pantalla (touch_ui)")
+	else:
+		var abil := 0
+		for b: Dictionary in main.input.button_rects():
+			if int(b["idx"]) <= 2:
+				abil += 1
+				if not bool(main.touch) and String(b.get("key", "")) == "":
+					_bad.append("con teclado, el botón %d no dice qué tecla lo lanza" % int(b["idx"]))
+		if abil != 3:
+			_bad.append("hay %d botones de habilidad, no 3" % abil)
 	if not _bad.is_empty() or _checked >= 120:
 		_finish(_bad)
 
@@ -54,7 +70,7 @@ func _finish(bad: Array) -> void:
 	var mode := "táctil" if bool(main.touch) else "teclado"
 	if bad.is_empty():
 		print("[SONDA] hud_keys_probe (%s): %d fotogramas mirados; el HUD dice: %s" % [
-			mode, _checked, String(main.hud.text).replace("\n", " / ")])
+			mode, _checked, String(main.hud.text)])
 		print("hud_keys_probe: OK")
 		get_tree().quit(0)
 		return

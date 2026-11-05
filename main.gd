@@ -2469,39 +2469,19 @@ func _show_badge(badge: int) -> void:
 	_badge_tween.chain().tween_callback(_badge_img.hide)
 
 
-## Línea de órdenes de los esqueletos para el HUD de escritorio.
+## Órdenes de los esqueletos para el HUD. Con teclado se dice cómo cambiarlas (no hay botón en
+## pantalla para ellas); con el dedo ya está el botón de las órdenes.
 func _orders_hud() -> String:
 	if not _has_minions():
 		return ""
-	return "\nEsqueletos: %s   ·   F alterna Atacar/Reagrupar   ·   F mantenida: Emboscada donde apuntas" % Minions.ORDER_NAMES[pf.minion_order]
+	return "Esqueletos: %s%s" % [Minions.ORDER_NAMES[pf.minion_order],
+		"" if touch else "  (F cambia · mantén F: emboscada)"]
 
-
-## Texto de una ranura de habilidad: recarga o cargas, como la barra del HUD del juego.
-func _slot(i: int) -> String:
-	var ab := _abil(i)
-	var name := String(ab["n"])
-	if swap_ready(i):
-		return "[%s CAMBIAR]" % name
-	if i == 2 and pf.ult_by_charge:
-		return "[%s %s]" % [name, "LISTA" if pf.ability_ready(2) else "carga " + pf.cooldown_text(2)]
-	if int(ab.get("chg", 0)) > 0:
-		var left := pf.cooldown_left(i)       # lo que falta para la siguiente carga
-		return "[%s %d/%d%s]" % [name, _chg[i], int(ab["chg"]), " · %.0fs" % ceilf(left) if left > 0.0 else ""]
-	if i == 0 and pf.ammo_max > 0:
-		return "[%s %d/%d]" % [name, pf.ammo, pf.ammo_max]
-	if pf.cd[i] > 0.0:
-		return "[%s %.0fs]" % [name, pf.cd[i]]
-	return "[%s LISTA]" % name
 
 var _log_t := 0.0
 var _last_anim := ""
 var _fx_t := 0.0
 
-## Las teclas del HUD, solo con teclado y ratón: en el móvil gastaban una o dos líneas de la esquina
-## en contarte cosas que ahí no puedes hacer (petición del usuario, 2026-09-20: "yo estoy en un
-## celular, a mí no me sirve ese texto"). Con el dedo, los botones ya se ven en pantalla.
-const KEYS_TEAM := "\nclic izq / Q básica · clic der o E táctica · R definitiva · WASD · Shift correr · Ctrl agacharse · C cámara · Esc ratón · F10 salir"
-const KEYS_HORDE := "\nclic izq / Q · clic der o E (mantener para ver el radio) · R definitiva\nWASD mover · Shift correr · Ctrl agacharse · ratón girar · rueda zoom · C cámara · Esc ratón · F10 salir"
 
 func _process(_d: float) -> void:
 	if _mode == "menu":
@@ -2611,29 +2591,22 @@ func _process(_d: float) -> void:
 		return
 	if hud == null or net_client != null:
 		return
-	if team_mode != null:
-		var st := "vida %d/%d" % [int(_php), int(pf.hp_max())] if pf.alive() else "CAÍDO"
-		hud.text = ("%s  ·  %s%s\n%d FPS%s\n%s   %s   %s%s") % [
-			pf.display_name, st, ("  ·  OCULTO" if player_hidden() else ""),
-			Engine.get_frames_per_second(), _zone_hud(), _slot(0), _slot(1), _slot(2),
-			"" if touch else KEYS_TEAM]
-		hud.text += _orders_hud()
-		return
-	var cx := int(round(player.global_position.x / CELL + mw * 0.5))
-	var cy := int(round(player.global_position.z / CELL + mh * 0.5))
-	var zone := "campo"
-	if cx >= 0 and cx < mw and cy >= 0 and cy < mh:
-		# Un nombre por zona, erial incluido: sin él, el HUD reventaba cada fotograma al pisar tierra.
-		zone = ["campo", "cueva", "cementerio", "erial"][clampi(int(zones[cx][cy]), 0, 3)]
-	var estado := "CAÍDO" if _php <= 0.0 else "vida %d/%d" % [int(_php), int(pf.hp_max())]
-	var oculto := ""
-	if pf.crouch:
-		oculto = "  ·  AGACHADO" + ("  ·  OCULTO" if player_hidden() else "")
-	hud.text = ("%s  ·  OLEADA %d/%d   ·   criaturas vivas %d   ·   por salir %d   ·   bajas %d   ·   %s%s\n"
-		+ "%d FPS   |   %d props   |   celda %d,%d (%s)%s\n"
-		+ "%s   %s   %s%s") % [
-		String(LEGENDS[_legend]["name"]), horde.wave if horde != null else 0, Horde.WAVES, zombies.size(),
-		horde.left_to_spawn if horde != null else 0, _kills, estado, oculto,
-		Engine.get_frames_per_second(), _props, cx, cy, zone, _zone_hud(),
-		_slot(0), _slot(1), _slot(2), "" if touch else KEYS_HORDE]
-	hud.text += _orders_hud()
+	# Una sola línea (petición del usuario, 2026-11-05: "hay mucha información en texto arriba a la
+	# izquierda"). Antes cabían aquí tu vida (ya está la barra sobre tu leyenda), FPS (se encienden
+	# desde la pausa), props y celda (depuración), las tres habilidades en texto (ya están los botones,
+	# también con teclado: touch_ui.gd) y dos líneas de teclas (están en la pausa). Queda lo que no
+	# se ve en otro sitio: la oleada, si estás oculto, el gas y las órdenes del Rey liche.
+	var parts: Array[String] = []
+	if team_mode == null:
+		parts.append("OLEADA %d/%d" % [horde.wave if horde != null else 0, Horde.WAVES])
+		parts.append("%d criatura%s" % [zombies.size(), "" if zombies.size() == 1 else "s"])
+		parts.append("%d baja%s" % [_kills, "" if _kills == 1 else "s"])
+	if player_hidden():
+		parts.append("OCULTO")
+	var zone_txt := _zone_hud().trim_prefix("   |   ")
+	if zone_txt != "":
+		parts.append(zone_txt)
+	var orders := _orders_hud()
+	if orders != "":
+		parts.append(orders)
+	hud.text = "  ·  ".join(parts)
