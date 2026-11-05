@@ -1,0 +1,13 @@
+# Railway da el puerto en PORT. El export va sin hilos (thread_support=false): no hacen falta
+# cabeceras COOP/COEP. tools/deploy_web.sh deja al lado un .gz de cada fichero grande, y Caddy lo
+# sirve tal cual a quien acepte gzip (el .wasm baja de 38 MB a ~9).
+:{$PORT:8080} {
+	root * /srv
+	file_server {
+		precompressed gzip
+	}
+	# index.html siempre fresco (apunta a la versión nueva); el resto puede cachearse una hora.
+	@html path / /index.html
+	header @html Cache-Control "no-cache"
+	header /index.* Cache-Control "public, max-age=3600"
+}

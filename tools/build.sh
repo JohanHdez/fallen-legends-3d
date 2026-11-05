@@ -16,6 +16,9 @@ if [ -z "$VERSION" ]; then
 fi
 if [[ "$OSTYPE" == darwin* ]]; then
   TPL_DIR="$HOME/Library/Application Support/Godot/export_templates/$VERSION.stable"
+elif [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* ]]; then
+  # Windows (Git Bash). En el PC de Windows Godot vive en C:\Users\1234\Godot: GODOT=/c/Users/1234/Godot/Godot_v4.7.2-stable_win64_console.exe
+  TPL_DIR="$APPDATA/Godot/export_templates/$VERSION.stable"
 else
   TPL_DIR="$HOME/.local/share/godot/export_templates/$VERSION.stable"
 fi

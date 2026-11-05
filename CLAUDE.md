@@ -45,6 +45,7 @@ godot --headless --fixed-fps 60 --path . -- --team=4 --autoplay --down-one=20 --
 godot --headless --fixed-fps 60 --path . -- --legend=5 --nozone --zombies=0 --probe=minion_probe      # órdenes del Rey liche
 tools/sync_2d.sh [--copy]                        # deriva frente al 2D (copias literales y balance)
 tools/build.sh android | android-release | web   # exportar (docs/DESPLIEGUE.md); nunca sin tools/check.sh antes
+tools/deploy_web.sh [--build]                    # sube export/web al servicio "web" de Railway (docs/DESPLIEGUE.md)
 ```
 Capturas (todo lo que va tras `--` llega a `_args` como `--clave=valor`):
 ```
@@ -55,7 +56,7 @@ godot --path . --resolution 1600x720 -- --mode=2v2 --autoplay --touch --shot=/tm
 Flags de prueba (todos en README § "Opciones útiles para probar"): `--mode`, `--legend`,
 `--autoplay`, `--team`, `--down-one`, `--expect-defeat`, `--rounds`, `--roundtime`, `--autocast`, `--probe`, `--near`, `--zombies`, `--wave`,
 `--boss`, `--foe`, `--dianas`, `--cd`, `--nozone`, `--zonewait`, `--zonefast`, `--cycle`, `--night`,
-`--nodecor`, `--noshadow`, `--touch`, `--roster`, `--fxtest`, `--bench`, `--log`, `--animlog`,
+`--nodecor`, `--noshadow`, `--lite`, `--touch`, `--roster`, `--fxtest`, `--bench`, `--log`, `--animlog`,
 `--sporelog`, `--dashlog`, `--meleelog`, `--rocklog`, `--dbg`, `--server`, `--transport`, `--port`,
 `--client`, `--name`, `--identity`, `--protocol`, `--netprobe`.
 

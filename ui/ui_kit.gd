@@ -5,6 +5,21 @@ class_name UiKit
 extends RefCounted
 
 const GOLD := Color(1.0, 0.82, 0.38)
+const SYMBOL_FONT := "res://ui/fonts/DejaVuSans.ttf"
+
+
+## La fuente por defecto de Godot (Open Sans) no trae ◀ ▶ ▲ ▼ ● ○ ↔ ☰ ✕. En escritorio y Android
+## los presta la fuente del sistema, pero en la web no hay sistema: salían cuadritos con el código
+## (2026-11-04). DejaVu Sans (licencia libre, ui/fonts/DejaVuSans-LICENSE.txt) va de respaldo de la
+## fuente por defecto, así que basta con llamarla una vez al arrancar; repetirla no duplica nada.
+static func install_symbol_font() -> void:
+	var sym: Font = load(SYMBOL_FONT)
+	for f: Font in [ThemeDB.fallback_font, ThemeDB.get_default_theme().default_font]:
+		if f == null or f.fallbacks.has(sym):
+			continue
+		var fb := f.fallbacks.duplicate()
+		fb.append(sym)
+		f.fallbacks = fb
 
 
 static func label(sz: int, c: Color) -> Label:

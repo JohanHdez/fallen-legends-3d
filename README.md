@@ -953,8 +953,11 @@ sigue en la sala.
 --wave=N        empezar en la oleada N
 --nodecor       sin hierba ni flores
 --noshadow      sin sombras
+--lite          calidad de móvil con teclado (sin sombras ni SSAO, mitad de hierba y partículas);
+                la web la usa siempre: en una Intel HD 620 pasó de 5 a ~15 FPS
 --log           traza por consola (headless)
---bench         FPS y tiempos por fotograma
+--bench         FPS, tiempos por fotograma, dibujos y triángulos (y tiempo de dibujo de CPU/GPU;
+                con Compatibility la GPU sale a 0: ese renderizador no la mide)
 --fxtest        mantiene rayos, una esfera y la trampa o baliza de tu leyenda puestas, para juzgar los efectos
 --poseanim=N    fija esa animación en tu leyenda (Crawl_Fwd, Jog_Left, Idle_Tired...) para juzgarla en
                 una captura; con --roster, la hacen las siete leyendas en fila

@@ -258,6 +258,11 @@ var _aim_dot: MeshInstance3D = null
 var _orders_hold := -1.0           # F mantenida para las órdenes del Rey liche: segundos (-1 = suelta)
 
 var touch := false
+## Calidad de móvil (sin sombras ni SSAO, mitad de hierba y de partículas, tope de 60 FPS). Va con
+## `touch` y además en la web aunque se juegue con teclado: el navegador corre en un solo hilo con el
+## renderizador Compatibility, y en un portátil con Intel HD 620 la calidad de escritorio daba 5 FPS
+## (2026-11-05). `touch` sigue mandando en controles, HUD y reglas; `lite` solo en lo que se pinta.
+var lite := false
 var touch_ui: Control = null
 var minimap: Minimap = null
 var show_fps := false             # contador de FPS de la esquina (se enciende desde la pausa)
@@ -268,6 +273,7 @@ var input: PlayerInput = null     # teclado, ratón, táctil y apuntado: game/pl
 
 func _ready() -> void:
 	_collect_args()
+	UiKit.install_symbol_font()   # ◀ ▶ ▲ ▼ ☰… en la web, donde no hay fuente del sistema
 	# Servidor dedicado del juego en línea: sin partida en marcha no monta mapa, cámara ni HUD (la
 	# sala la lleva el autoload Net); en cuanto el líder pulsa Iniciar, Net._request_start recarga
 	# esta escena con el reparto que guardó en NetServer, y entonces SÍ se construye el mundo, igual
@@ -295,8 +301,9 @@ func _ready() -> void:
 	# tras salir de una sigue ahí, parado; sin eso `_pick_mode` volvería a entrar en la abandonada.
 	var nc := NetService.node().client
 	net_client = nc if nc != null and nc.has_match() and not _args.has("server") else null
+	lite = touch or OS.has_feature("web") or _args.has("lite")
 	_mode = _pick_mode()
-	if touch:
+	if lite:
 		# El S24 Ultra y compañía van a 120 Hz: sin tope, el juego intenta 120 y se le nota el tirón
 		# cuando no llega. A 60 el fotograma es estable y gasta la mitad de batería (petición del
 		# usuario, 2026-09-17: "los FPS mínimo 30, ideal 60").
@@ -317,7 +324,7 @@ func _ready() -> void:
 	# puede cambiar la partida. Pero sí lleva la MISMA semilla ya resuelta, para que dos partidas
 	# iguales se pinten igual y para que `--seed=N` cambie también el dibujo (antes se saltaba el
 	# flag y los torneos de balance pintaban todos idéntico: revisión del 2026-09-20).
-	vfx = Vfx.new(self, touch, int(rng.seed))
+	vfx = Vfx.new(self, lite, int(rng.seed))
 	combat = Combat.new(self, vfx)
 	var t0 := Time.get_ticks_msec()
 	var m: Dictionary = MapBuilder.horde_map(MAP_SEED)
@@ -563,7 +570,7 @@ func _setup_environment() -> void:
 	env.ambient_light_sky_contribution = 0.35
 	env.ambient_light_color = Color(0.42, 0.47, 0.55)
 	env.ambient_light_energy = 0.4
-	env.ssao_enabled = not touch
+	env.ssao_enabled = not lite
 	env.fog_enabled = true
 	env.fog_density = 0.0022
 	env.fog_light_color = Color(0.70, 0.78, 0.85)
@@ -577,8 +584,8 @@ func _setup_environment() -> void:
 	sun.rotation_degrees = Vector3(-48, -125, 0)
 	sun.light_energy = 1.0
 	sun.light_color = Color(1.0, 0.96, 0.88)
-	sun.shadow_enabled = not _args.has("noshadow") and not touch
-	sun.directional_shadow_max_distance = 30.0 if touch else 55.0
+	sun.shadow_enabled = not _args.has("noshadow") and not lite
+	sun.directional_shadow_max_distance = 30.0 if lite else 55.0
 	add_child(sun)
 
 
@@ -1113,8 +1120,8 @@ func _scatter_grass(by_model: Dictionary) -> void:
 			if int(zones[x][y]) != 0 and tier != 2:
 				continue
 			var pool: Array = tall_pool if tier == 2 else (tufts if tier == 1 else short_pool)
-			var count: int = {MapLayout.PLAIN: (1 if touch else 2), 0: (2 if touch else 4),
-				1: (4 if touch else 7), 2: (6 if touch else 12)}[tier]
+			var count: int = {MapLayout.PLAIN: (1 if lite else 2), 0: (2 if lite else 4),
+				1: (4 if lite else 7), 2: (6 if lite else 12)}[tier]
 			for i in count:
 				var name: String = pool[r.randi() % pool.size()]
 				var xf := Transform3D.IDENTITY
@@ -2549,14 +2556,21 @@ func _process(_d: float) -> void:
 			if combat.storms.is_empty() and String(_abil(2)["k"]) == "zone":
 				combat.do_cast(pf, 2, player.global_position + f * float(_abil(2).get("rng", 0.0)) * PX)
 	if _args.has("bench"):
+		var vp_rid := get_viewport().get_viewport_rid()
+		RenderingServer.viewport_set_measure_render_time(vp_rid, true)
 		_log_t -= 1.0
 		if _log_t <= 0.0:
 			_log_t = 20.0
-			print("[BENCH] vivos=%d fps=%d fisica=%.1fms render=%.1fms objetos=%d" % [
+			print("[BENCH] dibujo cpu=%.1fms gpu=%.1fms" % [
+				RenderingServer.viewport_get_measured_render_time_cpu(vp_rid),
+				RenderingServer.viewport_get_measured_render_time_gpu(vp_rid)])
+			print("[BENCH] vivos=%d fps=%d fisica=%.1fms render=%.1fms objetos=%d dibujos=%d triangulos=%dk" % [
 				zombies.size(), Engine.get_frames_per_second(),
 				Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0,
 				Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
-				Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)])
+				Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME),
+				Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
+				Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME) / 1000])
 	if _args.has("animlog") and player_anim != null:
 		var cur := player_anim.current_animation + "@%.2f" % player_anim.speed_scale
 		if cur != _last_anim:
