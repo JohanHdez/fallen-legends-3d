@@ -1607,18 +1607,9 @@ func _pick_mode() -> String:
 	return "menu"
 
 
-## Menú de inicio sobre el mapa: tu leyenda escondida, la cámara dando vueltas alta y el menú encima.
+## Menú de inicio sobre el mapa: tu leyenda en el centro con la cámara cerca (MenuStage) y el menú encima.
 func _setup_menu() -> void:
-	if player_model != null:
-		player_model.visible = false
-	if pf.bar != null:
-		pf.bar.visible = false
-	if hud != null:
-		hud.visible = false
-	_cam_mode = 1
-	_apply_cam_mode()
-	spring.spring_length = 34.0
-	_pitch = -0.55
+	MenuStage.setup(self)
 	var layer := CanvasLayer.new()
 	layer.layer = 30
 	add_child(layer)
@@ -2285,10 +2276,7 @@ func _physics_process(delta: float) -> void:
 	if player == null:
 		return
 	if _mode == "menu":
-		_yaw += delta * 0.06
-		pivot.global_position = Vector3(0, 2.0, 0)
-		pivot.rotation.y = _yaw
-		spring.rotation.x = _pitch
+		MenuStage.tick(self, delta)
 		return
 	_tick_powers(delta)
 	if team_mode != null:

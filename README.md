@@ -44,10 +44,15 @@ El JDK 17 está en `~/Library/Java/jdk-17` y el SDK de Android en `~/Library/And
 
 ## Menú y modos de juego
 
-Al abrir el juego sale un **menú de inicio** sobre el mapa: eliges modo y leyenda y pulsas JUGAR
-(también con ratón, dedo o flechas y Enter). Con cualquier opción de línea de comandos, o en
-headless, se salta y se juega la Horda como siempre; `--mode=` elige directamente. El botón
-**EN LÍNEA**, al lado de tu nombre, lleva a la sala del servidor: § "Juego en línea (en construcción)".
+Al abrir el juego sale un **menú de inicio** sobre el mapa, al estilo de la pantalla de inicio del 2D
+(2026-11-09): **tu leyenda en 3D en el centro**, de frente, en el claro del cementerio y con la
+cámara meciéndose despacio; **◀ ▶** a sus lados la cambian en caliente (también ← →), con su nombre,
+vida, velocidad y habilidades debajo. Abajo, el **equipo** de la Horda (Solo 2 3 4), el **modo** con
+‹ › (también ↑ ↓) y **JUGAR** (o Enter). Con cualquier opción de línea de comandos, o en headless, se
+salta y se juega la Horda como siempre; `--mode=` elige directamente (`--mode=menu` lo enseña, para
+capturas). Arriba a la izquierda va tu nombre y a la derecha **EN LÍNEA**, que lleva a la sala del
+servidor: § "Juego en línea (en construcción)". La cámara del menú está en `ui/menu_stage.gd`; el
+diseño, en `docs/superpowers/specs/2026-11-09-pantalla-inicio-design.md`.
 
 | Modo | Qué es |
 |---|---|
